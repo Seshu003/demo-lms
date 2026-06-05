@@ -232,16 +232,29 @@ BACK: [definition or explanation]` : ""}`,
 
 async function run4Agents(topic, mode, length, onStep) {
   const agents = buildAgents(topic, mode, length);
-  let prev = "";
+  const results = [];
 
   for (let i = 0; i < agents.length; i++) {
     onStep(i, "loading");
-    // Pass agentIndex so server routes to the right API key
-    const out = await geminiCall(agents[i].sys, agents[i].prompt + (prev && i > 0 ? `\n\nContext from previous agent: ${prev.slice(0, 600)}` : ""), i);
-    prev = out;
-    onStep(i, "done", out);
+    try {
+      // Build cumulative context from all previous steps so they act as a real team
+      let context = "";
+      if (i > 0) {
+        context = "\n\nContext from previous team members:\n" + 
+          results.map((res, idx) => `[${agents[idx].name} Output]:\n${res}`).join("\n\n");
+      }
+      
+      const prompt = agents[i].prompt + context;
+      const out = await geminiCall(agents[i].sys, prompt, i);
+      results.push(out);
+      onStep(i, "done", out);
+    } catch (err) {
+      onStep(i, "error", err.message);
+      throw err;
+    }
   }
-  return prev; // Last agent's output (Theory Explainer)
+  
+  return results[3]; // Return Theory Explainer output
 }
 
 // ── Output parser — robust with fallbacks ────────────
@@ -471,6 +484,59 @@ function LessonPage({ lesson, completed, onComplete, setPage }) {
   const idx = allIds.indexOf(lesson.id);
   const next = ALL_LESSONS[idx + 1];
   const mod = COURSE.modules.find(m => m.lessons.some(l => l.id === lesson.id));
+
+  // Quiz states
+  const [quiz, setQuiz] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const [agents, setAgents] = useState([{ s: "idle" }, { s: "idle" }, { s: "idle" }, { s: "idle" }]);
+  const [quizIdx, setQuizIdx] = useState(0);
+  const [quizAns, setQuizAns] = useState(null);
+
+  useEffect(() => {
+    setQuiz(null);
+    setLoading(false);
+    setErr("");
+    setAgents([{ s: "idle" }, { s: "idle" }, { s: "idle" }, { s: "idle" }]);
+    setQuizIdx(0);
+    setQuizAns(null);
+  }, [lesson.id]);
+
+  const handleGenerateQuiz = async () => {
+    setErr("");
+    setLoading(true);
+    setAgents([{ s: "idle" }, { s: "idle" }, { s: "idle" }, { s: "idle" }]);
+    try {
+      const topic = `Python lesson: ${lesson.title}. Overview: ${lesson.overview}. Key points: ${lesson.pts.join(", ")}`;
+      const finalText = await run4Agents(
+        topic,
+        "Beginner",
+        "Medium",
+        (i, status, out) => {
+          setAgents(prev => prev.map((a, idx) => idx === i ? { s: status, out } : a));
+        }
+      );
+      const parsed = parseOutput(finalText);
+      if (!parsed.quizQuestions || parsed.quizQuestions.length === 0) {
+        throw new Error("No quiz questions were returned by the AI. Please try again.");
+      }
+      setQuiz(parsed);
+      setQuizIdx(0);
+      setQuizAns(null);
+    } catch (e) {
+      setErr(e.message || "Failed to generate quiz.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const AGENT_META_LOCAL = [
+    { name: "Topic Planner", Icon: Target, color: T.accent },
+    { name: "Requirement Dev", Icon: Layers, color: T.green },
+    { name: "Output Optimizer", Icon: Zap, color: T.amber },
+    { name: "Theory Explainer", Icon: Lightbulb, color: T.purple },
+  ];
+
   return (
     <div style={{ padding: "32px 36px", maxWidth: 900 }}>
       <button onClick={() => setPage("courses")} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 13, marginBottom: 22, padding: 0 }}>
@@ -503,6 +569,111 @@ function LessonPage({ lesson, completed, onComplete, setPage }) {
           ))}
         </div>
       </div>
+
+      {/* Interactive Practice Quiz */}
+      <div style={{ background: T.s2, border: `1px solid ${T.border}`, borderRadius: 12, padding: "20px", marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Brain size={16} color={T.purple} />
+            <div style={{ color: T.text, fontSize: 14, fontWeight: 600 }}>Interactive AI Practice Quiz</div>
+          </div>
+          {!quiz && !loading && (
+            <button onClick={handleGenerateQuiz} style={{ background: T.purple, color: "#fff", border: "none", padding: "6px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+              <Sparkles size={13} /> Generate Quiz
+            </button>
+          )}
+        </div>
+
+        {loading && (
+          <div>
+            <div style={{ fontSize: 11, color: T.muted, marginBottom: 12, fontWeight: 600, letterSpacing: "0.05em" }}>GENERATING LESSON QUIZ...</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
+              {AGENT_META_LOCAL.map((ag, i) => {
+                const s = agents[i]?.s;
+                const { Icon } = ag;
+                const isActive = s === "loading";
+                const isDone = s === "done";
+                return (
+                  <div key={i} style={{ background: isDone ? `${ag.color}10` : isActive ? `${ag.color}08` : T.s3, border: `1px solid ${isDone ? ag.color + "40" : isActive ? ag.color + "30" : T.border}`, borderRadius: 10, padding: "10px 12px", transition: "all 0.3s" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                      <div style={{ width: 22, height: 22, borderRadius: 6, background: `${ag.color}20`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <Icon size={11} color={ag.color} />
+                      </div>
+                      {isDone ? <CheckCircle size={12} color={T.green} /> :
+                        isActive ? <Loader2 size={12} color={ag.color} style={{ animation: "spin 1s linear infinite" }} /> :
+                          <Circle size={12} color={T.dim} />}
+                    </div>
+                    <div style={{ fontSize: 11, color: isDone ? T.text : T.muted, fontWeight: isDone || isActive ? 600 : 400, lineHeight: 1.2 }}>{ag.name}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {err && <div style={{ color: T.red, fontSize: 12, background: `${T.red}12`, padding: "8px 12px", borderRadius: 7 }}>⚠️ {err}</div>}
+
+        {quiz && quiz.quizQuestions?.length > 0 && (
+          <div>
+            {(() => {
+              const q = quiz.quizQuestions[quizIdx];
+              return q ? (
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                    <div style={{ fontSize: 12, color: T.muted }}>Question {quizIdx + 1} of {quiz.quizQuestions.length}</div>
+                    <button onClick={() => { setQuizIdx(0); setQuizAns(null); }}
+                      style={{ background: "none", border: `1px solid ${T.border}`, color: T.muted, borderRadius: 6, padding: "3px 8px", fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+                      <RotateCcw size={10} /> Reset
+                    </button>
+                  </div>
+                  <div style={{ color: T.text, fontSize: 14, fontWeight: 600, marginBottom: 12, lineHeight: 1.5 }}>{q.question}</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {q.options.map((opt, oi) => {
+                      const isSelected = quizAns === oi;
+                      const isCorrect = oi === q.correct;
+                      const showResult = quizAns !== null;
+                      let bg = T.s3, border = T.border, color = T.muted;
+                      if (showResult && isCorrect) { bg = `${T.green}18`; border = `${T.green}50`; color = T.green; }
+                      else if (showResult && isSelected) { bg = `${T.red}18`; border = `${T.red}50`; color = T.red; }
+                      else if (!showResult && isSelected) { bg = `${T.accent}18`; border = `${T.accent}50`; color = T.accent; }
+                      return (
+                        <button key={oi} onClick={() => { if (quizAns === null) setQuizAns(oi); }}
+                          disabled={quizAns !== null}
+                          style={{ background: bg, border: `1px solid ${border}`, borderRadius: 8, padding: "10px 14px", color, fontSize: 12.5, cursor: quizAns !== null ? "default" : "pointer", textAlign: "left", transition: "all 0.2s" }}>
+                          <span style={{ fontWeight: 700, marginRight: 8 }}>{"ABCD"[oi]})</span>{opt}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {quizAns !== null && (
+                    <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontSize: 12, color: quizAns === q.correct ? T.green : T.red, fontWeight: 600 }}>
+                        {quizAns === q.correct ? "✓ Correct!" : `✗ Incorrect — correct answer: ${"ABCD"[q.correct]}`}
+                      </span>
+                      {quizIdx < quiz.quizQuestions.length - 1 && (
+                        <button onClick={() => { setQuizIdx(i => i + 1); setQuizAns(null); }}
+                          style={{ background: T.accent, color: "#fff", border: "none", padding: "6px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+                          Next <ChevronRight size={12} />
+                        </button>
+                      )}
+                      {quizIdx === quiz.quizQuestions.length - 1 && (
+                        <span style={{ fontSize: 12, color: T.muted }}>Quiz complete! 🎉</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : null;
+            })()}
+          </div>
+        )}
+
+        {!quiz && !loading && !err && (
+          <div style={{ color: T.muted, fontSize: 13, textAlign: "center", padding: "10px 0" }}>
+            Test your understanding of this lesson by generating a custom quiz!
+          </div>
+        )}
+      </div>
+
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         {completed[lesson.id] ? (
           <div style={{ display: "flex", alignItems: "center", gap: 8, color: T.green, fontSize: 14, fontWeight: 600 }}>
@@ -603,7 +774,7 @@ function GeneralTutor() {
       {/* Backend status pill */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 16, padding: "6px 12px", background: T.s2, border: `1px solid ${T.border}`, borderRadius: 8, width: "fit-content" }}>
         <div style={{ width: 7, height: 7, borderRadius: "50%", background: T.green }} />
-        <span style={{ fontSize: 12, color: T.muted }}>API key loaded from server · model: gemini-1.5-flash</span>
+        <span style={{ fontSize: 12, color: T.muted }}>API key loaded from server · model: gemini-3.5-flash</span>
         <Lock size={11} color={T.dim} />
       </div>
 
@@ -981,6 +1152,14 @@ export default function App() {
     el.rel = "stylesheet";
     el.href = "https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap";
     document.head.appendChild(el);
+
+    const styleEl = document.createElement("style");
+    styleEl.innerHTML = `
+      body, button, input, textarea, select {
+        font-family: 'Outfit', 'Segoe UI', sans-serif !important;
+      }
+    `;
+    document.head.appendChild(styleEl);
   }, []);
 
   const onComplete = (id) => setCompleted(p => ({ ...p, [id]: true }));

@@ -49,11 +49,21 @@ async function fetchWithRetry(url, options, retries = 15, initialDelay = 2000) {
 }
 
 app.post('/api/gemini', async (req, res) => {
-  const { system, user } = req.body;
-  console.log(`[Backend] Incoming request. System Prompt Length: ${system ? system.length : 0}, User Prompt: "${user.slice(0, 100)}..."`);
+  const { system, user, agentIndex } = req.body;
+  const idx = typeof agentIndex === 'number' ? agentIndex : 0;
 
-  if (!GEMINI_API_KEY) {
-    console.error('[Backend] Error: GEMINI_API_KEY is not set');
+  const keys = [
+    process.env.GEMINI_API_KEY_1,
+    process.env.GEMINI_API_KEY_2,
+    process.env.GEMINI_API_KEY_3,
+    process.env.GEMINI_API_KEY_4
+  ];
+  const activeKey = keys[idx] || process.env.GEMINI_API_KEY;
+
+  console.log(`[Backend] Incoming request (Agent ${idx}). System Prompt Length: ${system ? system.length : 0}, User Prompt: "${user ? user.slice(0, 100) : ''}..."`);
+
+  if (!activeKey) {
+    console.error(`[Backend] Error: Gemini API key for agent ${idx} is not set`);
     return res.status(500).json({ error: 'Gemini API key is not configured on the server.' });
   }
 
@@ -63,7 +73,7 @@ app.post('/api/gemini', async (req, res) => {
 
   try {
     const { response, data } = await fetchWithRetry(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${activeKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
