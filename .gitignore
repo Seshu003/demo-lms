@@ -6,7 +6,9 @@ node_modules/
 # Testing
 /coverage
 
-# Production
+# Production build
+/.next/
+/out/
 /dist
 
 # Environment variables
@@ -34,3 +36,12 @@ pnpm-debug.log*
 # OS Files
 .DS_Store
 Thumbs.db
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+
+# Next.js
+next-env.d.ts
