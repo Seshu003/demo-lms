@@ -45,3 +45,9 @@ Thumbs.db
 
 # Next.js
 next-env.d.ts
+
+# Old Vite SPA artifacts (migrated to Next.js)
+vite.config.js
+index.html
+src/
+lms-demo.jsx

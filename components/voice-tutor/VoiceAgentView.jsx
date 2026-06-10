@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { T } from '@/lib/lms-data';
-import VoiceSidebar from './VoiceSidebar';
+import UnifiedSidebar from './UnifiedSidebar';
 import VoiceChatMessages from './VoiceChatMessages';
 import VoiceRobotVisualizer from './VoiceRobotVisualizer';
 
@@ -31,7 +31,9 @@ function generateLabel(messages, subject) {
   return subjects[subject] || 'Untitled Session';
 }
 
-export default function VoiceAgentView({ onClose }) {
+const TEXT_SESSIONS_KEY = 'general-tutor-sessions';
+
+export default function VoiceAgentView({ onClose, initialSession }) {
   const [selectedLanguage, setSelectedLanguage] = useState('all');
   const [selectedSubject, setSelectedSubject] = useState('all');
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
@@ -40,6 +42,28 @@ export default function VoiceAgentView({ onClose }) {
   const [currentSentiment, setCurrentSentiment] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
   const [sessions, setSessions] = useState(loadSessions);
+  const [textSessions, setTextSessions] = useState([]);
+
+  // Load text sessions for unified sidebar
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(TEXT_SESSIONS_KEY);
+      if (raw) setTextSessions(JSON.parse(raw));
+    } catch {}
+  }, []);
+
+  // Merge both session types
+  const mergedSessions = useMemo(() => {
+    const voice = (sessions || []).map(s => ({ ...s, type: 'voice' }));
+    const text = (textSessions || []).map(s => ({ ...s, type: 'text' }));
+    const all = [...text, ...voice];
+    all.sort((a, b) => {
+      const ta = new Date(a.timestamp || a.startedAt || 0).getTime();
+      const tb = new Date(b.timestamp || b.startedAt || 0).getTime();
+      return tb - ta;
+    });
+    return all;
+  }, [sessions, textSessions]);
 
   const wsRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -52,6 +76,17 @@ export default function VoiceAgentView({ onClose }) {
   const wsHadErrorRef = useRef(false);
 
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
+
+  // Restore initial session passed from parent (e.g. when clicking a voice session from sidebar)
+  useEffect(() => {
+    if (initialSession && initialSession.messages) {
+      setConversation(initialSession.messages.map((m) => ({ ...m, timestamp: new Date(m.timestamp) })));
+      setCurrentSentiment(null);
+      if (initialSession.subject) setSelectedSubject(initialSession.subject);
+      if (initialSession.language) setSelectedLanguage(initialSession.language);
+      setStatusMessage(`Viewing: ${initialSession.label}`);
+    }
+  }, []); // only on mount
 
   const stopAllAudioPlaybacks = useCallback(() => {
     audioSourcesQueueRef.current.forEach((source) => { try { source.stop(); } catch {} });
@@ -143,12 +178,27 @@ export default function VoiceAgentView({ onClose }) {
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
         audioCtxRef.current = audioCtx;
 
-        const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${wsProto}//${window.location.host}/api/ws?language=${selectedLanguage}&subject=${selectedSubject}`;
+        const wsHost = process.env.NEXT_PUBLIC_WS_URL || (
+          window.location.hostname === 'localhost'
+            ? `ws://localhost:5001`
+            : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
+        );
+        const wsUrl = `${wsHost}/api/ws?language=${selectedLanguage}&subject=${selectedSubject}`;
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
+        // Connection timeout — prevents hanging on "connecting" forever
+        const connTimeout = setTimeout(() => {
+          if (ws.readyState !== WebSocket.OPEN) {
+            wsHadErrorRef.current = true;
+            ws.close();
+            setConnectionStatus('error');
+            setStatusMessage('Connection timed out. Make sure the voice server is running (npm run dev:voice).');
+          }
+        }, 10000);
+
         ws.onopen = () => {
+          clearTimeout(connTimeout);
           setConversation([]);
           setCurrentSentiment(null);
           setConnectionStatus('connected');
@@ -197,8 +247,17 @@ export default function VoiceAgentView({ onClose }) {
           }
         };
 
-        ws.onclose = () => { terminateSession(wsHadErrorRef.current); };
-        ws.onerror = () => { wsHadErrorRef.current = true; setConnectionStatus('error'); setStatusMessage('Connection failed. Verify the server is running and your microphone is accessible.'); };
+        ws.onclose = () => {
+          clearTimeout(connTimeout);
+          // Don't override error status — keep the error message visible
+          if (!wsHadErrorRef.current) terminateSession(false);
+        };
+        ws.onerror = () => {
+          clearTimeout(connTimeout);
+          wsHadErrorRef.current = true;
+          setConnectionStatus('error');
+          setStatusMessage('Connection failed. Verify the voice server is running.');
+        };
       } catch (err) {
         setConnectionStatus('error');
         setStatusMessage(`Unable to access mic: ${err.message || err}. Please permit microphone access.`);
@@ -237,7 +296,19 @@ export default function VoiceAgentView({ onClose }) {
       fontFamily: 'var(--font-outfit), "Segoe UI", sans-serif'
     }}>
       {/* History Sidebar */}
-      <VoiceSidebar sessions={sessions} onSelectSession={handleSelectSession} onBack={onClose} />
+      <UnifiedSidebar
+        sessions={mergedSessions}
+        currentSessionId={null}
+        onSelectSession={(session) => {
+          if (session.type === 'voice') {
+            handleSelectSession(session);
+          } else {
+            // Text session clicked — close overlay, parent will restore it
+            onClose();
+          }
+        }}
+        onBack={onClose}
+      />
 
       {/* Main Area */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, position: 'relative' }}>

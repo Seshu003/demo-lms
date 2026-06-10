@@ -3,16 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node server-with-ws.js",
-    "dev:next": "next dev",
+    "dev": "next dev",
+    "dev:combined": "node server-with-ws.js",
     "dev:voice": "node voice-server.js",
+    "start:voice": "node voice-server.js",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
     "@google/genai": "^2.8.0",
-    "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.22.2",
     "lucide-react": "^0.395.0",
