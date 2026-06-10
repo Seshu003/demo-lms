@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   Brain, Loader2, Sparkles, CheckCircle, Circle,
   ChevronRight, RotateCcw, Lightbulb, Lock, FlipHorizontal,
@@ -21,6 +21,7 @@ const QUICK_TABS = [
 
 import { AlignLeft } from 'lucide-react';
 import VoiceAgentView from '@/components/voice-tutor/VoiceAgentView';
+import UnifiedSidebar from '@/components/voice-tutor/UnifiedSidebar';
 
 export default function GeneralTutor() {
   const [topic,   setTopic]   = useState('');
@@ -39,6 +40,53 @@ export default function GeneralTutor() {
   const [messages, setMessages] = useState([]);
   const chatRef   = useRef(null);
   const inputRef  = useRef(null);
+  const [textSessions, setTextSessions] = useState([]);
+  const [voiceSessions, setVoiceSessions] = useState([]);
+  const [currentSessionId, setCurrentSessionId] = useState(null);
+  const textSessKey = 'general-tutor-sessions';
+  const voiceSessKey = 'voice-tutor-sessions';
+
+  // Load both session types from localStorage on mount
+  useEffect(() => {
+    try {
+      const raw1 = localStorage.getItem(textSessKey);
+      if (raw1) setTextSessions(JSON.parse(raw1));
+      const raw2 = localStorage.getItem(voiceSessKey);
+      if (raw2) setVoiceSessions(JSON.parse(raw2));
+    } catch {}
+  }, []);
+
+  // Merge both session types sorted by most recent
+  const mergedSessions = useMemo(() => {
+    const text = (textSessions || []).map(s => ({ ...s, type: 'text' }));
+    const voice = (voiceSessions || []).map(s => ({ ...s, type: 'voice' }));
+    const all = [...text, ...voice];
+    all.sort((a, b) => {
+      const ta = new Date(a.timestamp || a.startedAt || 0).getTime();
+      const tb = new Date(b.timestamp || b.startedAt || 0).getTime();
+      return tb - ta;
+    });
+    return all;
+  }, [textSessions, voiceSessions]);
+
+  const [voiceSessionToRestore, setVoiceSessionToRestore] = useState(null);
+
+  const handleSelectSession = useCallback((session) => {
+    if (session.type === 'voice') {
+      setVoiceSessionToRestore(session);
+      setShowVoiceAgent(true);
+      return;
+    }
+    setMessages(session.messages || []);
+    setResult(session.result || null);
+    setMode(session.mode || 'Beginner');
+    setLength(session.length || 'Medium');
+    setTab(session.tab || 'explanation');
+    setCurrentSessionId(session.id);
+    setQuizIdx(0); setQuizAns(null); setFcIdx(0); setFcFlipped(false);
+    setErr(''); setAgents([{ s: 'idle' }, { s: 'idle' }, { s: 'idle' }, { s: 'idle' }]);
+    setTopic('');
+  }, []);
 
   const handleGenerate = async () => {
     if (!topic.trim()) return setErr('Please enter a topic.');
@@ -62,7 +110,16 @@ export default function GeneralTutor() {
       setResult(parsed);
       setTab('explanation');
       setQuizIdx(0); setQuizAns(null); setFcIdx(0); setFcFlipped(false);
-      setMessages(prev => [...prev, { role: 'ai', text: parsed.explanation }]);
+      const newMessages = [...messages, { role: 'user', text: topic.trim(), mode, length }, { role: 'ai', text: parsed.explanation }];
+      setMessages(newMessages);
+      // Save session with the new data
+      const label = topic.trim().slice(0, 40) || 'Untitled';
+      const sid = currentSessionId || Date.now().toString(36);
+      const session = { id: sid, label, topic: topic.trim(), mode, length, messages: newMessages, result: parsed, tab: 'explanation', timestamp: new Date().toISOString() };
+      const updated = [session, ...textSessions.filter(s => s.id !== sid)];
+      setTextSessions(updated);
+      setCurrentSessionId(sid);
+      try { localStorage.setItem(textSessKey, JSON.stringify(updated)); } catch {}
     } catch (e) {
       setErr(e.message || 'Error reaching the backend.');
     } finally {
@@ -78,7 +135,15 @@ export default function GeneralTutor() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: T.bg, overflow: 'hidden' }}>
+    <div style={{ display: 'flex', height: '100vh', background: T.bg, overflow: 'hidden' }}>
+
+      <UnifiedSidebar
+        sessions={mergedSessions}
+        onSelectSession={handleSelectSession}
+        currentSessionId={currentSessionId}
+      />
+
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
       {/* ── HEADER ── */}
       <div style={{ padding: '14px 28px', borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, background: T.s1 }}>
@@ -587,8 +652,14 @@ export default function GeneralTutor() {
           </button>
         </div>
       </div>
+      </div>
       {/* Voice Agent Overlay */}
-      {showVoiceAgent && <VoiceAgentView onClose={() => setShowVoiceAgent(false)} />}
+      {showVoiceAgent && (
+        <VoiceAgentView
+          onClose={() => { setShowVoiceAgent(false); setVoiceSessionToRestore(null); }}
+          initialSession={voiceSessionToRestore}
+        />
+      )}
     </div>
   );
 }

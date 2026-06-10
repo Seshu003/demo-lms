@@ -3,7 +3,7 @@ const { WebSocketServer } = require('ws');
 const { GoogleGenAI, Modality } = require('@google/genai');
 require('dotenv').config();
 
-const PORT = process.env.VOICE_WS_PORT || 5001;
+const PORT = parseInt(process.env.PORT || '5001', 10);
 
 let aiClient = null;
 function getGeminiClient() {

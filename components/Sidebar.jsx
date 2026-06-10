@@ -18,6 +18,9 @@ export default function Sidebar() {
   const pathname = usePathname();
   const router   = useRouter();
 
+  // Hide sidebar on general-tutor page (has its own history sidebar)
+  if (pathname.startsWith('/general-tutor')) return null;
+
   // Derive active nav id: match exact path or parent path
   const isActive = (navId) => {
     if (navId === '/') return pathname === '/';
