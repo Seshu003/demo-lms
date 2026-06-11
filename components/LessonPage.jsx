@@ -7,6 +7,7 @@ import {
   Loader2, Sparkles, RotateCcw, ArrowLeft
 } from 'lucide-react';
 import { T, COURSE, ALL_LESSONS, geminiCall, buildQuizPrompt, parseQuizOutput } from '@/lib/lms-data';
+import { useMediaQuery, isMobileMQ } from '@/lib/useMediaQuery';
 
 export default function LessonPage({ lesson, completed = {}, onComplete }) {
   const router  = useRouter();
@@ -21,6 +22,8 @@ export default function LessonPage({ lesson, completed = {}, onComplete }) {
   const [err,     setErr]     = useState('');
   const [quizIdx, setQuizIdx] = useState(0);
   const [quizAns, setQuizAns] = useState(null);
+  const isMobile = useMediaQuery(isMobileMQ);
+  const rPad = isMobile ? 16 : 36;
 
   useEffect(() => {
     setQuiz(null); setLoading(false); setErr('');
@@ -47,9 +50,9 @@ export default function LessonPage({ lesson, completed = {}, onComplete }) {
   };
 
   return (
-    <div style={{ padding: '32px 36px', maxWidth: 900 }}>
+    <div style={{ padding: `32px ${rPad}px`, maxWidth: 900 }}>
       <button onClick={() => router.push('/courses')}
-        style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: T.muted, cursor: 'pointer', fontSize: 13, marginBottom: 22, padding: 0 }}>
+        style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: T.muted, cursor: 'pointer', fontSize: 13, marginBottom: isMobile ? 14 : 22, padding: 0 }}>
         <ArrowLeft size={15} /> Back to Course
       </button>
 
@@ -69,7 +72,7 @@ export default function LessonPage({ lesson, completed = {}, onComplete }) {
       {/* Video */}
       <div style={{ borderRadius: 14, overflow: 'hidden', border: `1px solid ${T.border}`, marginBottom: 22 }}>
         <iframe
-          width="100%" height="400"
+          width="100%" height={isMobile ? 200 : 400}
           src={`https://www.youtube.com/embed/${lesson.vid}`}
           title={lesson.title} frameBorder="0"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -78,7 +81,7 @@ export default function LessonPage({ lesson, completed = {}, onComplete }) {
       </div>
 
       {/* Overview + Key Points */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 16, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.4fr 1fr', gap: 16, marginBottom: 20 }}>
         <div style={{ background: T.s2, border: `1px solid ${T.border}`, borderRadius: 12, padding: '18px 20px' }}>
           <div style={{ color: T.text, fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Overview</div>
           <p style={{ color: T.muted, fontSize: 13.5, lineHeight: 1.7, margin: 0 }}>{lesson.overview}</p>
@@ -188,7 +191,7 @@ export default function LessonPage({ lesson, completed = {}, onComplete }) {
       </div>
 
       {/* Footer actions */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
         {completed[lesson.id] ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: T.green, fontSize: 14, fontWeight: 600 }}>
             <CheckCircle size={18} /> Completed!

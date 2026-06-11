@@ -1,9 +1,10 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { T } from '@/lib/lms-data';
-import { Brain, Zap, ArrowLeft, Settings } from 'lucide-react';
+import { Brain, Zap, ArrowLeft, Settings, Menu, X } from 'lucide-react';
+import { useMediaQuery, isMobileMQ } from '@/lib/useMediaQuery';
 
 function getDateLabel(dateStr) {
   if (!dateStr) return 'Older';
@@ -20,8 +21,10 @@ function getDateLabel(dateStr) {
   return 'Older';
 }
 
-export default function UnifiedSidebar({ sessions, currentSessionId, onSelectSession, onBack }) {
+export default function UnifiedSidebar({ sessions, currentSessionId, onSelectSession, onBack, mobileTopOffset, showMenuButton = true }) {
   const router = useRouter();
+  const isMobile = useMediaQuery(isMobileMQ);
+  const [open, setOpen] = useState(false);
 
   const grouped = useMemo(() => {
     const groups = {};
@@ -31,7 +34,6 @@ export default function UnifiedSidebar({ sessions, currentSessionId, onSelectSes
       if (!groups[label]) groups[label] = [];
       groups[label].push(session);
     }
-    // Sort within each group by timestamp descending
     for (const key of Object.keys(groups)) {
       groups[key].sort((a, b) => {
         const ta = new Date(a.timestamp || a.startedAt).getTime();
@@ -47,30 +49,38 @@ export default function UnifiedSidebar({ sessions, currentSessionId, onSelectSes
   const handleBack = () => {
     if (onBack) onBack();
     else router.push('/');
+    if (isMobile) setOpen(false);
   };
 
-  return (
+  const handleSelect = (session) => {
+    onSelectSession(session);
+    if (isMobile) setOpen(false);
+  };
+
+  const sidebarContent = (
     <div style={{
-      width: 240, minHeight: '100vh', background: T.s1,
-      borderRight: `1px solid ${T.border}`, display: 'flex',
-      flexDirection: 'column', flexShrink: 0
+      width: isMobile ? 260 : 240, minHeight: isMobile ? '100%' : '100vh',
+      background: T.s1, borderRight: `1px solid ${T.border}`,
+      display: 'flex', flexDirection: 'column', flexShrink: 0, height: isMobile ? '100%' : undefined,
     }}>
-      {/* Back + Logo */}
       <div style={{ padding: '18px 16px 14px', borderBottom: `1px solid ${T.border}` }}>
-        <button onClick={handleBack} style={{
-          display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12,
-          background: 'none', border: 'none', color: T.muted, cursor: 'pointer',
-          fontSize: 12, padding: 0, fontFamily: 'inherit'
-        }}>
-          <ArrowLeft size={14} />
-          <span>Back to Home</span>
-        </button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{
-            width: 34, height: 34, borderRadius: 10,
-            background: `${T.purple}22`, border: `1px solid ${T.purple}40`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center'
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <button onClick={handleBack} style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            background: 'none', border: 'none', color: T.muted, cursor: 'pointer',
+            fontSize: 12, padding: 0, fontFamily: 'inherit',
           }}>
+            <ArrowLeft size={14} />
+            <span>Back to Home</span>
+          </button>
+          {isMobile && (
+            <button onClick={() => setOpen(false)} style={{ background: 'none', border: 'none', color: T.muted, cursor: 'pointer', padding: 4 }}>
+              <X size={20} />
+            </button>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 34, height: 34, borderRadius: 10, background: `${T.purple}22`, border: `1px solid ${T.purple}40`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Brain size={16} color={T.purple} />
           </div>
           <div>
@@ -80,55 +90,31 @@ export default function UnifiedSidebar({ sessions, currentSessionId, onSelectSes
         </div>
       </div>
 
-      {/* Session History */}
       <nav style={{ flex: 1, padding: '12px 10px', overflowY: 'auto' }}>
         {orderedGroups.map((group) => {
           const items = grouped[group];
           if (!items || items.length === 0) return null;
           return (
             <div key={group} style={{ marginBottom: 16 }}>
-              <div style={{
-                fontSize: 10, color: T.dim, fontWeight: 600,
-                letterSpacing: '0.08em', textTransform: 'uppercase',
-                padding: '0 6px', marginBottom: 6
-              }}>
-                {group}
-              </div>
+              <div style={{ fontSize: 10, color: T.dim, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '0 6px', marginBottom: 6 }}>{group}</div>
               {items.map((session) => {
                 const isActive = session.id === currentSessionId;
                 const isVoice = session.type === 'voice';
                 return (
-                  <button key={session.type + '-' + session.id} onClick={() => onSelectSession(session)} style={{
-                    width: '100%', textAlign: 'left', padding: '8px 10px',
-                    borderRadius: 8, border: 'none',
+                  <button key={session.type + '-' + session.id} onClick={() => handleSelect(session)} style={{
+                    width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 8, border: 'none',
                     background: isActive ? `${T.accent}15` : 'transparent',
-                    color: isActive ? T.text : T.muted,
-                    cursor: 'pointer', fontSize: 12,
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    fontFamily: 'inherit', transition: 'all 0.15s'
+                    color: isActive ? T.text : T.muted, cursor: 'pointer', fontSize: 12,
+                    display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'inherit', transition: 'all 0.15s',
                   }}
                     onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = T.s2; }}
                     onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
                   >
-                    {/* Type tag */}
-                    <span style={{
-                      width: 20, height: 20, borderRadius: 6,
-                      background: isVoice ? `${T.accent}20` : `${T.purple}20`,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
-                    }}>
-                      {isVoice
-                        ? <Zap size={11} color={T.accent} />
-                        : <Brain size={11} color={T.purple} />}
+                    <span style={{ width: 20, height: 20, borderRadius: 6, background: isVoice ? `${T.accent}20` : `${T.purple}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      {isVoice ? <Zap size={11} color={T.accent} /> : <Brain size={11} color={T.purple} />}
                     </span>
-                    <span style={{
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      fontWeight: isActive ? 600 : 400, flex: 1
-                    }}>
-                      {session.label || 'Untitled'}
-                    </span>
-                    <span style={{ fontSize: 9, color: T.dim, flexShrink: 0 }}>
-                      {isVoice ? 'Voice' : 'Text'}
-                    </span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: isActive ? 600 : 400, flex: 1 }}>{session.label || 'Untitled'}</span>
+                    <span style={{ fontSize: 9, color: T.dim, flexShrink: 0 }}>{isVoice ? 'Voice' : 'Text'}</span>
                   </button>
                 );
               })}
@@ -136,26 +122,47 @@ export default function UnifiedSidebar({ sessions, currentSessionId, onSelectSes
           );
         })}
         {(!sessions || sessions.length === 0) && (
-          <div style={{ color: T.dim, fontSize: 11, textAlign: 'center', padding: '24px 0' }}>
-            No sessions yet
-          </div>
+          <div style={{ color: T.dim, fontSize: 11, textAlign: 'center', padding: '24px 0' }}>No sessions yet</div>
         )}
       </nav>
 
-      {/* Bottom */}
       <div style={{ padding: '12px 18px', borderTop: `1px solid ${T.border}` }}>
-        <button style={{
-          width: 32, height: 32, display: 'flex', alignItems: 'center',
-          justifyContent: 'center', borderRadius: 8, border: 'none',
-          background: 'transparent', color: T.muted, cursor: 'pointer',
-          fontFamily: 'inherit', transition: 'all 0.15s'
-        }}
+        <button style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: 'none', background: 'transparent', color: T.muted, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s' }}
           onMouseEnter={e => { e.currentTarget.style.background = T.s2; }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-        >
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
           <Settings size={14} />
         </button>
       </div>
     </div>
   );
+
+  if (isMobile && !showMenuButton) {
+    return sidebarContent;
+  }
+
+  if (isMobile) {
+    return (
+      <>
+        {!open && (
+          <button onClick={() => setOpen(true)} style={{
+            position: 'fixed', top: mobileTopOffset || 12, left: 12, zIndex: 999,
+            width: 40, height: 40, borderRadius: 10,
+            background: T.s2, border: `1px solid ${T.border}`,
+            color: T.text, cursor: 'pointer', display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Menu size={20} />
+          </button>
+        )}
+        {open && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex' }}>
+            <div style={{ flexShrink: 0 }}>{sidebarContent}</div>
+            <div style={{ flex: 1, background: 'rgba(0,0,0,0.5)' }} onClick={() => setOpen(false)} />
+          </div>
+        )}
+      </>
+    );
+  }
+
+  return sidebarContent;
 }

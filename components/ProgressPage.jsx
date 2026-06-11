@@ -4,11 +4,17 @@ import {
   BookOpen, CheckCircle, Circle, Clock, Trophy
 } from 'lucide-react';
 import { T, COURSE, ALL_LESSONS } from '@/lib/lms-data';
+import { useMediaQuery, isMobileMQ, isTabletMQ } from '@/lib/useMediaQuery';
 
 export default function ProgressPage({ completed = {} }) {
   const total = ALL_LESSONS.length;
   const done  = Object.values(completed).filter(Boolean).length;
   const pct   = Math.round((done / total) * 100);
+  const isMobile = useMediaQuery(isMobileMQ);
+  const isTablet = useMediaQuery(isTabletMQ);
+  const rPad = isMobile ? 16 : 36;
+  const statCols = isMobile ? 'repeat(2,1fr)' : isTablet ? 'repeat(2,1fr)' : 'repeat(4,1fr)';
+  const lessonCols = isMobile ? 'repeat(3,1fr)' : isTablet ? 'repeat(4,1fr)' : 'repeat(5,1fr)';
 
   const stats = [
     { label: 'Lessons Done',    val: done,        total: total, color: T.accent, Icon: CheckCircle },
@@ -18,7 +24,7 @@ export default function ProgressPage({ completed = {} }) {
   ];
 
   return (
-    <div style={{ padding: '32px 36px', maxWidth: 860 }}>
+    <div style={{ padding: isMobile ? '20px 16px' : '32px 36px', maxWidth: 860 }}>
       <h2 style={{ color: T.text, fontSize: 22, fontWeight: 700, margin: '0 0 6px', letterSpacing: '-0.03em' }}>
         Progress Dashboard
       </h2>
@@ -27,7 +33,7 @@ export default function ProgressPage({ completed = {} }) {
       </p>
 
       {/* Stats grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: statCols, gap: 12, marginBottom: 24 }}>
         {stats.map(({ label, val, total: t, color, Icon }) => (
           <div key={label} style={{ background: T.s2, border: `1px solid ${T.border}`, borderRadius: 12, padding: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
@@ -65,7 +71,7 @@ export default function ProgressPage({ completed = {} }) {
       {/* Lesson status grid */}
       <div style={{ background: T.s2, border: `1px solid ${T.border}`, borderRadius: 12, padding: '20px' }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 12 }}>Lesson Status</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 6 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: lessonCols, gap: 6 }}>
           {ALL_LESSONS.map(l => (
             <div key={l.id} title={l.title}
               style={{

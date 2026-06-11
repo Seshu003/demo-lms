@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { cacheGet, cacheSet, makeCacheKey } from '@/lib/cache';
+import { getRotatedKey } from '@/lib/keys';
 
 function calculateWait(error, baseDelay, attempt) {
   if (error?.details) {
@@ -43,7 +44,7 @@ async function fetchWithRetry(url, options, retries = 5, baseDelay = 1000) {
 
 export async function POST(request) {
   const { system, user, maxOutputTokens } = await request.json();
-  const activeKey = process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY_1;
+  const activeKey = getRotatedKey();
 
   if (!activeKey) {
     return NextResponse.json({ error: 'Gemini API key is not configured on the server.' }, { status: 500 });

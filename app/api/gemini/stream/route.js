@@ -2,10 +2,11 @@ import { NextResponse } from 'next/server';
 import { streamText } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { cacheGet, cacheSet, makeCacheKey } from '@/lib/cache';
+import { getRotatedKey } from '@/lib/keys';
 
 export async function POST(request) {
   const { system, user, maxOutputTokens } = await request.json();
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY_1;
+  const apiKey = getRotatedKey();
 
   if (!apiKey) {
     return NextResponse.json({ error: 'Gemini API key is not configured on the server.' }, { status: 500 });

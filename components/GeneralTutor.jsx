@@ -5,7 +5,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Brain, Loader2, ChevronRight, Lock, FlipHorizontal,
-  Paperclip, Mic, Image, HelpCircle, Send, AlignLeft, Sparkles
+  Paperclip, Mic, Image, HelpCircle, Send, AlignLeft, Sparkles, ChevronLeft,
+  BookOpen, Code2, BarChart3, Home, Zap
 } from 'lucide-react';
 import {
   T, geminiCall,
@@ -17,6 +18,8 @@ import {
 } from '@/lib/lms-data';
 import VoiceAgentView from '@/components/voice-tutor/VoiceAgentView';
 import UnifiedSidebar from '@/components/voice-tutor/UnifiedSidebar';
+import MobileNav from '@/components/MobileNav';
+import { useMediaQuery, isMobileMQ } from '@/lib/useMediaQuery';
 
 const MODES = ['Beginner', 'Exam', 'Interview', 'Revision'];
 const LENGTHS = ['Short', 'Medium', 'Deep'];
@@ -49,6 +52,28 @@ export default function GeneralTutor() {
   const inputRef = useRef(null);
   const textSessKey = 'general-tutor-sessions';
   const voiceSessKey = 'voice-tutor-sessions';
+
+  const isMobile = useMediaQuery(isMobileMQ);
+  const rPad = isMobile ? 14 : 28;
+  const rGap = isMobile ? 8 : 12;
+  const msgMaxW = isMobile ? '100%' : 720;
+  const bubbleMaxW = isMobile ? '100%' : 480;
+  const fCol = isMobile ? '1fr' : '1fr 1fr';
+
+  function getDateLabel(dateStr) {
+    if (!dateStr) return 'Older';
+    const date = new Date(dateStr);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const weekStart = new Date(today);
+    weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+    if (date >= today) return 'Today';
+    if (date >= yesterday) return 'Yesterday';
+    if (date >= weekStart) return 'This Week';
+    return 'Older';
+  }
 
   useEffect(() => {
     try {
@@ -296,6 +321,111 @@ export default function GeneralTutor() {
     return false;
   };
 
+  const tutorNavItems = [
+    { href: '/',              Icon: Home,      label: 'Dashboard'     },
+    { href: '/courses',       Icon: BookOpen,  label: 'Courses'       },
+    { href: '/coding-tutor',  Icon: Code2,     label: 'Coding Tutor'  },
+    { href: '/progress',      Icon: BarChart3, label: 'Progress'      },
+  ];
+
+  const tutorExtras = (close) => {
+    const items = [];
+
+    // Mode select
+    items.push(
+      <div key="mode-select">
+        <label style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>LEARNING MODE</label>
+        <select value={mode} onChange={e => setMode(e.target.value)}
+          style={{ width: '100%', appearance: 'none', background: T.s2, border: `1px solid ${modeColors[mode] + '50' || T.border}`, borderRadius: 8, padding: '8px 12px', color: modeColors[mode] || T.text, fontSize: 13, fontWeight: 600, cursor: 'pointer', outline: 'none', fontFamily: 'inherit' }}>
+          {MODES.map(m => <option key={m} value={m} style={{ background: T.s1, color: T.text }}>{m}</option>)}
+        </select>
+      </div>
+    );
+
+    // Length select
+    items.push(
+      <div key="len-select">
+        <label style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>RESPONSE DEPTH</label>
+        <select value={length} onChange={e => setLength(e.target.value)}
+          style={{ width: '100%', appearance: 'none', background: T.s2, border: `1px solid ${length === 'Short' ? T.amber + '50' : length === 'Medium' ? T.accent + '50' : T.purple + '50'}`, borderRadius: 8, padding: '8px 12px', color: length === 'Short' ? T.amber : length === 'Medium' ? T.accent : T.purple, fontSize: 13, fontWeight: 600, cursor: 'pointer', outline: 'none', fontFamily: 'inherit' }}>
+          {LENGTHS.map(l => <option key={l} value={l} style={{ background: T.s1, color: T.text }}>{l}</option>)}
+        </select>
+      </div>
+    );
+
+    // Session history (mobile only)
+    if (isMobile && mergedSessions?.length > 0) {
+      const groups = {};
+      const ordered = ['Today', 'Yesterday', 'This Week', 'Older'];
+      for (const s of mergedSessions) {
+        const label = getDateLabel(s.timestamp || s.startedAt);
+        if (!groups[label]) groups[label] = [];
+        groups[label].push(s);
+      }
+      for (const key of Object.keys(groups)) {
+        groups[key].sort((a, b) => {
+          return new Date(b.timestamp || b.startedAt).getTime() - new Date(a.timestamp || a.startedAt).getTime();
+        });
+      }
+
+      items.push(
+        <div key="sessions">
+          <div style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: '0.06em', marginBottom: 8 }}>SESSION HISTORY</div>
+          {ordered.map(group => {
+            const sList = groups[group];
+            if (!sList) return null;
+            return (
+              <div key={group} style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 10, color: T.dim, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '0 4px', marginBottom: 4 }}>{group}</div>
+                {sList.map(session => {
+                  const isActive = session.id === currentSessionId;
+                  const isVoice = session.type === 'voice';
+                  return (
+                    <button key={session.type + '-' + session.id}
+                      onClick={() => {
+                        if (isVoice) {
+                          setVoiceSessionToRestore(session);
+                          setShowVoiceAgent(true);
+                        } else {
+                          const msgs = (session.messages || []).map(m => ({ ...m, features: m.features || {} }));
+                          setMessages(msgs);
+                          setMode(session.mode || 'Beginner');
+                          setLength(session.length || 'Medium');
+                          setCurrentSessionId(session.id);
+                          setErr(''); setTopic('');
+                        }
+                        if (close) close();
+                      }}
+                      style={{
+                        width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 8, border: 'none',
+                        background: isActive ? `${T.accent}15` : 'transparent',
+                        color: isActive ? T.text : T.muted, cursor: 'pointer', fontSize: 12,
+                        display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'inherit',
+                      }}>
+                      <span style={{
+                        width: 20, height: 20, borderRadius: 6,
+                        background: isVoice ? `${T.accent}20` : `${T.purple}20`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+                      }}>
+                        {isVoice ? <Zap size={11} color={T.accent} /> : <Brain size={11} color={T.purple} />}
+                      </span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: isActive ? 600 : 400, flex: 1 }}>
+                        {session.label || 'Untitled'}
+                      </span>
+                      <span style={{ fontSize: 9, color: T.dim, flexShrink: 0 }}>{isVoice ? 'Voice' : 'Text'}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    return items;
+  };
+
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -304,22 +434,27 @@ export default function GeneralTutor() {
   };
 
   return (
-    <div style={{ display: 'flex', height: '100vh', background: T.bg, overflow: 'hidden' }}>
-      <UnifiedSidebar
-        sessions={mergedSessions}
-        onSelectSession={handleSelectSession}
-        currentSessionId={currentSessionId}
-      />
+    <>
+      <MobileNav title="General Tutor" accent={T.purple} items={tutorNavItems} extras={tutorExtras} />
+      <div style={{ display: 'flex', height: '100vh', background: T.bg, overflow: 'hidden' }}>
+        {!isMobile && (
+          <UnifiedSidebar
+            sessions={mergedSessions}
+            onSelectSession={handleSelectSession}
+            currentSessionId={currentSessionId}
+            showMenuButton={false}
+          />
+        )}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
         {/* ── HEADER ── */}
-        <div style={{ padding: '14px 28px', borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, background: T.s1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ width: 38, height: 38, borderRadius: 10, background: `${T.purple}18`, border: `1px solid ${T.purple}35`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Brain size={18} color={T.purple} />
+        <div style={{ padding: isMobile ? '10px 14px' : '14px 28px', borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, background: T.s1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: rGap }}>
+            <div style={{ width: isMobile ? 32 : 38, height: isMobile ? 32 : 38, borderRadius: 10, background: `${T.purple}18`, border: `1px solid ${T.purple}35`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Brain size={isMobile ? 15 : 18} color={T.purple} />
             </div>
             <div>
-              <h2 style={{ color: T.text, fontSize: 18, fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>General Tutor</h2>
+              <h2 style={{ color: T.text, fontSize: isMobile ? 15 : 18, fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>General Tutor</h2>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
                 <div style={{ width: 6, height: 6, borderRadius: '50%', background: T.green, flexShrink: 0 }} />
                 <span style={{ fontSize: 11, color: T.muted, fontWeight: 500 }}>AI Tutor</span>
@@ -327,15 +462,18 @@ export default function GeneralTutor() {
               </div>
             </div>
           </div>
+          {isMobile && streamingText && (
+            <Loader2 size={14} color={T.accent} style={{ animation: 'spin 1s linear infinite' }} />
+          )}
         </div>
 
         {/* ── CHAT AREA ── */}
-        <div ref={chatRef} style={{ flex: 1, overflowY: 'auto', padding: '28px 28px 16px' }}>
+        <div ref={chatRef} style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '16px 14px 10px' : '28px 28px 16px' }}>
 
           {/* Welcome AI message */}
-          <div style={{ display: 'flex', gap: 12, marginBottom: 24, maxWidth: 720 }}>
-            <div style={{ width: 36, height: 36, borderRadius: '50%', background: `${T.purple}25`, border: `1px solid ${T.purple}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <Brain size={16} color={T.purple} />
+          <div style={{ display: 'flex', gap: rGap, marginBottom: 24, maxWidth: msgMaxW }}>
+            <div style={{ width: isMobile ? 30 : 36, height: isMobile ? 30 : 36, borderRadius: '50%', background: `${T.purple}25`, border: `1px solid ${T.purple}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Brain size={isMobile ? 14 : 16} color={T.purple} />
             </div>
             <div>
               <div style={{ fontSize: 11, color: T.purple, fontWeight: 700, letterSpacing: '0.05em', marginBottom: 4 }}>LMS AI TUTOR</div>
@@ -350,10 +488,10 @@ export default function GeneralTutor() {
             <div key={msg.id || mi} style={{ marginBottom: 20 }}>
               {/* ── User message ── */}
               {msg.role === 'user' && (
-                <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', maxWidth: 720, marginLeft: 'auto' }}>
+                <div style={{ display: 'flex', gap: rGap, justifyContent: 'flex-end', maxWidth: msgMaxW, marginLeft: 'auto' }}>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: '0.04em', marginBottom: 4 }}>YOU</div>
-                    <div style={{ background: T.s3, border: `1px solid ${T.border}`, borderRadius: '14px 14px 4px 14px', padding: '12px 16px', color: T.text, fontSize: 14, lineHeight: 1.65, maxWidth: 480 }}>
+                    <div style={{ background: T.s3, border: `1px solid ${T.border}`, borderRadius: '14px 14px 4px 14px', padding: '10px 14px', color: T.text, fontSize: 14, lineHeight: 1.65, maxWidth: bubbleMaxW }}>
                       {msg.content}
                     </div>
                     <div style={{ fontSize: 10, color: T.dim, marginTop: 4 }}>{msg.mode} &middot; {msg.length}</div>
@@ -364,9 +502,9 @@ export default function GeneralTutor() {
 
               {/* ── AI message ── */}
               {msg.role === 'ai' && (
-                <div style={{ display: 'flex', gap: 12, maxWidth: 720 }}>
-                  <div style={{ width: 36, height: 36, borderRadius: '50%', background: `${T.purple}25`, border: `1px solid ${T.purple}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <Brain size={16} color={T.purple} />
+                <div style={{ display: 'flex', gap: rGap, maxWidth: msgMaxW }}>
+                  <div style={{ width: isMobile ? 30 : 36, height: isMobile ? 30 : 36, borderRadius: '50%', background: `${T.purple}25`, border: `1px solid ${T.purple}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Brain size={isMobile ? 14 : 16} color={T.purple} />
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 11, color: T.purple, fontWeight: 700, letterSpacing: '0.05em', marginBottom: 4 }}>LMS AI TUTOR</div>
@@ -496,7 +634,7 @@ export default function GeneralTutor() {
                             Regenerate
                           </button>
                         </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: fCol, gap: 10 }}>
                           {msg.features.infographic.points.map((pt, i) => {
                             const colors = [T.accent, T.green, T.purple, T.amber, T.red];
                             const icons = ['\uD83C\uDFAF', '\uD83D\uDCCC', '\u26A1', '\uD83D\uDD11', '\uD83C\uDF1F', '\uD83D\uDC8E', '\uD83E\uDDE9', '\uD83D\uDE80'];
@@ -571,13 +709,13 @@ export default function GeneralTutor() {
 
           {/* ── STREAMING ── */}
           {streamingText && (
-            <div style={{ display: 'flex', gap: 12, marginBottom: 20, maxWidth: 720 }}>
-              <div style={{ width: 36, height: 36, borderRadius: '50%', background: `${T.purple}25`, border: `1px solid ${T.purple}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <Brain size={16} color={T.purple} />
+            <div style={{ display: 'flex', gap: rGap, marginBottom: 20, maxWidth: msgMaxW }}>
+              <div style={{ width: isMobile ? 30 : 36, height: isMobile ? 30 : 36, borderRadius: '50%', background: `${T.purple}25`, border: `1px solid ${T.purple}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Brain size={isMobile ? 14 : 16} color={T.purple} />
               </div>
-              <div style={{ flex: 1 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 11, color: T.purple, fontWeight: 700, letterSpacing: '0.05em', marginBottom: 4 }}>LMS AI TUTOR</div>
-                <div ref={streamElRef} style={{ color: T.text, fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap' }} />
+                <div ref={streamElRef} style={{ color: T.text, fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }} />
                 <Loader2 size={12} color={T.accent} style={{ animation: 'spin 1s linear infinite', marginTop: 6 }} />
               </div>
             </div>
@@ -585,9 +723,9 @@ export default function GeneralTutor() {
 
           {/* ── LOADING ── */}
           {loading && !streamingText && (
-            <div style={{ display: 'flex', gap: 12, marginBottom: 20, maxWidth: 720 }}>
-              <div style={{ width: 36, height: 36, borderRadius: '50%', background: `${T.purple}25`, border: `1px solid ${T.purple}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <Brain size={16} color={T.purple} />
+            <div style={{ display: 'flex', gap: rGap, marginBottom: 20, maxWidth: msgMaxW }}>
+              <div style={{ width: isMobile ? 30 : 36, height: isMobile ? 30 : 36, borderRadius: '50%', background: `${T.purple}25`, border: `1px solid ${T.purple}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Brain size={isMobile ? 14 : 16} color={T.purple} />
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <Loader2 size={16} color={T.accent} style={{ animation: 'spin 1s linear infinite' }} />
@@ -605,8 +743,8 @@ export default function GeneralTutor() {
         </div>
 
         {/* ── BOTTOM: Mode/Depth selects + Input ── */}
-        <div style={{ flexShrink: 0, borderTop: `1px solid ${T.border}`, background: T.s1, padding: '14px 28px 18px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 12, flexWrap: 'wrap' }}>
+        <div style={{ flexShrink: 0, borderTop: `1px solid ${T.border}`, background: T.s1, padding: isMobile ? '10px 14px 14px' : '14px 28px 18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 14, marginBottom: 10, flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <label style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: '0.06em' }}>LEARNING MODE</label>
               <div style={{ position: 'relative' }}>
@@ -627,9 +765,9 @@ export default function GeneralTutor() {
                 <ChevronRight size={13} color={length === 'Short' ? T.amber : length === 'Medium' ? T.accent : T.purple} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%) rotate(90deg)', pointerEvents: 'none' }} />
               </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto', padding: '6px 14px', background: T.s2, border: `1px solid ${T.border}`, borderRadius: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 4 : 6, marginLeft: isMobile ? 0 : 'auto', padding: '6px 14px', background: T.s2, border: `1px solid ${T.border}`, borderRadius: 20 }}>
               <div style={{ width: 6, height: 6, borderRadius: '50%', background: T.green, flexShrink: 0 }} />
-              <span style={{ fontSize: 11, color: T.muted, fontWeight: 600 }}>{mode.toUpperCase()} &middot; {length.toUpperCase()}</span>
+              <span style={{ fontSize: isMobile ? 10 : 11, color: T.muted, fontWeight: 600 }}>{mode.toUpperCase()} &middot; {length.toUpperCase()}</span>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10 }}>
@@ -679,5 +817,6 @@ export default function GeneralTutor() {
         .md-content blockquote { border-left: 3px solid #5B8CF8; margin: 0.6em 0; padding: 4px 12px; color: #647298; background: rgba(91,140,248,0.06); border-radius: 0 8px 8px 0; }
       `}</style>
     </div>
+  </>
   );
 }

@@ -4,13 +4,16 @@ import {
   CheckCircle, Circle, Clock, Play
 } from 'lucide-react';
 import { T, COURSE, ALL_LESSONS } from '@/lib/lms-data';
+import { useMediaQuery, isMobileMQ } from '@/lib/useMediaQuery';
 
 export default function CoursePage({ completed = {} }) {
   const total = ALL_LESSONS.length;
   const done  = Object.values(completed).filter(Boolean).length;
+  const isMobile = useMediaQuery(isMobileMQ);
+  const rPad = isMobile ? 16 : 36;
 
   return (
-    <div style={{ padding: '32px 36px', maxWidth: 860 }}>
+    <div style={{ padding: isMobile ? '20px 16px' : '32px 36px', maxWidth: 860 }}>
       {/* Header */}
       <div style={{ marginBottom: 28 }}>
         <h2 style={{ color: T.text, fontSize: 22, fontWeight: 700, margin: '0 0 4px', letterSpacing: '-0.03em' }}>
