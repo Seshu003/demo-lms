@@ -19,7 +19,7 @@ export default function RootLayout({ children }) {
       <body style={{ margin: 0, padding: 0, backgroundColor: '#07080F' }}>
         <div style={{ display: 'flex', minHeight: '100vh', background: '#07080F', color: '#DDE3F2' }}>
           <Sidebar />
-          <div style={{ flex: 1, overflowY: 'auto', maxHeight: '100vh' }}>
+          <div className="sidebar-content-area" style={{ flex: 1, overflowY: 'auto', maxHeight: '100vh' }}>
             {children}
           </div>
         </div>

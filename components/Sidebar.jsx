@@ -1,10 +1,13 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   BookOpen, Brain, Code2, BarChart3, Home, Zap
 } from 'lucide-react';
 import { T } from '@/lib/lms-data';
+import { useMediaQuery, isMobileMQ } from '@/lib/useMediaQuery';
+import MobileNav from './MobileNav';
 
 const NAV = [
   { id: '/',              Icon: Home,      label: 'Dashboard'     },
@@ -17,32 +20,50 @@ const NAV = [
 export default function Sidebar() {
   const pathname = usePathname();
   const router   = useRouter();
+  const isMobile = useMediaQuery(isMobileMQ);
+  const isGeneralTutor = pathname.startsWith('/general-tutor');
 
-  // Hide sidebar on general-tutor page (has its own history sidebar)
-  if (pathname.startsWith('/general-tutor')) return null;
+  // Inject padding so content clears the fixed MobileNav top bar
+  useEffect(() => {
+    if (isMobile && !isGeneralTutor) {
+      const el = document.createElement('style');
+      el.id = 'sidebar-mobile-pad';
+      el.textContent = '.sidebar-content-area { padding-top: 48px !important; }';
+      document.head.appendChild(el);
+      return () => { document.getElementById('sidebar-mobile-pad')?.remove(); };
+    }
+  }, [isMobile, isGeneralTutor]);
 
-  // Derive active nav id: match exact path or parent path
+  if (isGeneralTutor) return null;
+
   const isActive = (navId) => {
     if (navId === '/') return pathname === '/';
     return pathname.startsWith(navId);
   };
 
+  // ── Mobile: fixed top bar + centered menu ──
+  if (isMobile) {
+    return (
+      <MobileNav
+        title="LMS AI"
+        accent={T.accent}
+        items={NAV.map(({ id, Icon, label }) => ({
+          href: id, Icon, label,
+        }))}
+      />
+    );
+  }
+
+  // ── Desktop: vertical sidebar ──
   return (
     <div style={{
       width: 220, minHeight: '100vh', background: T.s1,
       borderRight: `1px solid ${T.border}`, display: 'flex',
       flexDirection: 'column', padding: '24px 0', flexShrink: 0
     }}>
-      {/* Logo */}
-      <div style={{
-        padding: '0 20px 28px', borderBottom: `1px solid ${T.border}`, marginBottom: 16
-      }}>
+      <div style={{ padding: '0 20px 28px', borderBottom: `1px solid ${T.border}`, marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{
-            width: 36, height: 36, borderRadius: 10,
-            background: `${T.accent}22`, border: `1px solid ${T.accent}40`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center'
-          }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: `${T.accent}22`, border: `1px solid ${T.accent}40`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Zap size={18} color={T.accent} />
           </div>
           <div>
@@ -51,40 +72,27 @@ export default function Sidebar() {
           </div>
         </div>
       </div>
-
-      {/* Nav */}
       <div style={{ flex: 1, padding: '0 12px' }}>
         {NAV.map(({ id, Icon, label }) => {
           const active = isActive(id);
           return (
-            <button
-              key={id}
-              onClick={() => router.push(id)}
-              style={{
-                width: '100%', display: 'flex', alignItems: 'center', gap: 11,
-                padding: '10px 13px', borderRadius: 9, marginBottom: 3,
-                background: active ? `${T.accent}18` : 'transparent',
-                border: active ? `1px solid ${T.accent}30` : '1px solid transparent',
-                color: active ? T.accent : T.muted, cursor: 'pointer',
-                fontSize: 13.5, fontWeight: active ? 600 : 400,
-                letterSpacing: '-0.01em', transition: 'all 0.15s'
-              }}
-            >
+            <button key={id} onClick={() => router.push(id)} style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 11,
+              padding: '10px 13px', borderRadius: 9, marginBottom: 3,
+              background: active ? `${T.accent}18` : 'transparent',
+              border: active ? `1px solid ${T.accent}30` : '1px solid transparent',
+              color: active ? T.accent : T.muted, cursor: 'pointer',
+              fontSize: 13.5, fontWeight: active ? 600 : 400,
+              letterSpacing: '-0.01em', transition: 'all 0.15s', fontFamily: 'inherit',
+            }}>
               <Icon size={16} />{label}
             </button>
           );
         })}
       </div>
-
-      {/* Footer */}
       <div style={{ padding: '14px 18px', borderTop: `1px solid ${T.border}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          <div style={{
-            width: 30, height: 30, borderRadius: '50%',
-            background: `${T.purple}30`, display: 'flex',
-            alignItems: 'center', justifyContent: 'center',
-            fontSize: 12, color: T.purple, fontWeight: 700
-          }}>S</div>
+          <div style={{ width: 30, height: 30, borderRadius: '50%', background: `${T.purple}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: T.purple, fontWeight: 700 }}>S</div>
           <div>
             <div style={{ color: T.text, fontSize: 13, fontWeight: 500 }}>Student</div>
             <div style={{ color: T.muted, fontSize: 11 }}>Free Plan</div>
