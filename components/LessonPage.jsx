@@ -3,11 +3,10 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  Brain, CheckCircle, Circle, ChevronRight, Clock,
-  Loader2, Sparkles, RotateCcw, ArrowLeft, Layers,
-  Zap, Lightbulb, Target
+  Brain, CheckCircle, ChevronRight, Clock,
+  Loader2, Sparkles, RotateCcw, ArrowLeft
 } from 'lucide-react';
-import { T, COURSE, ALL_LESSONS, AGENT_META, run4Agents, parseOutput } from '@/lib/lms-data';
+import { T, COURSE, ALL_LESSONS, geminiCall, buildQuizPrompt, parseQuizOutput } from '@/lib/lms-data';
 
 export default function LessonPage({ lesson, completed = {}, onComplete }) {
   const router  = useRouter();
@@ -20,30 +19,26 @@ export default function LessonPage({ lesson, completed = {}, onComplete }) {
   const [quiz,    setQuiz]    = useState(null);
   const [loading, setLoading] = useState(false);
   const [err,     setErr]     = useState('');
-  const [agents,  setAgents]  = useState([{ s: 'idle' }, { s: 'idle' }, { s: 'idle' }, { s: 'idle' }]);
   const [quizIdx, setQuizIdx] = useState(0);
   const [quizAns, setQuizAns] = useState(null);
 
   useEffect(() => {
     setQuiz(null); setLoading(false); setErr('');
-    setAgents([{ s: 'idle' }, { s: 'idle' }, { s: 'idle' }, { s: 'idle' }]);
     setQuizIdx(0); setQuizAns(null);
   }, [lesson.id]);
 
   const handleGenerateQuiz = async () => {
     setErr(''); setLoading(true);
-    setAgents([{ s: 'idle' }, { s: 'idle' }, { s: 'idle' }, { s: 'idle' }]);
     try {
       const topic = `Python lesson: ${lesson.title}. Overview: ${lesson.overview}. Key points: ${lesson.pts.join(', ')}`;
-      const finalText = await run4Agents(
-        topic, 'Beginner', 'Medium',
-        (i, status, out) => setAgents(prev => prev.map((a, idx) => idx === i ? { s: status, out } : a))
-      );
-      const parsed = parseOutput(finalText);
-      if (!parsed.quizQuestions || parsed.quizQuestions.length === 0) {
+      const system = 'You are a quiz generator. Output only quiz questions in the specified format.';
+      const prompt = buildQuizPrompt(topic, 'Beginner', 4);
+      const text = await geminiCall(system, prompt);
+      const questions = parseQuizOutput(text);
+      if (!questions.length) {
         throw new Error('No quiz questions were returned by the AI. Please try again.');
       }
-      setQuiz(parsed); setQuizIdx(0); setQuizAns(null);
+      setQuiz({ quizQuestions: questions }); setQuizIdx(0); setQuizAns(null);
     } catch (e) {
       setErr(e.message || 'Failed to generate quiz.');
     } finally {
@@ -120,35 +115,10 @@ export default function LessonPage({ lesson, completed = {}, onComplete }) {
           )}
         </div>
 
-        {/* Agent pipeline status */}
         {loading && (
-          <div>
-            <div style={{ fontSize: 11, color: T.muted, marginBottom: 12, fontWeight: 600, letterSpacing: '0.05em' }}>GENERATING LESSON QUIZ...</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10 }}>
-              {AGENT_META.map((ag, i) => {
-                const s = agents[i]?.s;
-                const { Icon } = ag;
-                const isActive = s === 'loading';
-                const isDone   = s === 'done';
-                return (
-                  <div key={i} style={{
-                    background: isDone ? `${ag.color}10` : isActive ? `${ag.color}08` : T.s3,
-                    border: `1px solid ${isDone ? ag.color + '40' : isActive ? ag.color + '30' : T.border}`,
-                    borderRadius: 10, padding: '10px 12px', transition: 'all 0.3s'
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                      <div style={{ width: 22, height: 22, borderRadius: 6, background: `${ag.color}20`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Icon size={11} color={ag.color} />
-                      </div>
-                      {isDone ? <CheckCircle size={12} color={T.green} /> :
-                        isActive ? <Loader2 size={12} color={ag.color} style={{ animation: 'spin 1s linear infinite' }} /> :
-                          <Circle size={12} color={T.dim} />}
-                    </div>
-                    <div style={{ fontSize: 11, color: isDone ? T.text : T.muted, fontWeight: isDone || isActive ? 600 : 400, lineHeight: 1.2 }}>{ag.name}</div>
-                  </div>
-                );
-              })}
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0' }}>
+            <Loader2 size={16} color={T.purple} style={{ animation: 'spin 1s linear infinite' }} />
+            <span style={{ fontSize: 13, color: T.muted }}>Generating quiz questions...</span>
           </div>
         )}
 
