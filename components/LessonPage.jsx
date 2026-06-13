@@ -6,15 +6,16 @@ import {
   Brain, CheckCircle, ChevronRight, Clock,
   Loader2, Sparkles, RotateCcw, ArrowLeft
 } from 'lucide-react';
-import { T, COURSE, ALL_LESSONS, geminiCall, buildQuizPrompt, parseQuizOutput } from '@/lib/lms-data';
+import { T, COURSE, geminiCall, buildQuizPrompt, parseQuizOutput, getCourseDetails } from '@/lib/lms-data';
 import { useMediaQuery, isMobileMQ } from '@/lib/useMediaQuery';
+import { getCourses } from '@/lib/frappe';
 
 export default function LessonPage({ lesson, completed = {}, onComplete }) {
   const router  = useRouter();
-  const allIds  = ALL_LESSONS.map(l => l.id);
-  const idx     = allIds.indexOf(lesson.id);
-  const next    = ALL_LESSONS[idx + 1];
-  const mod     = COURSE.modules.find(m => m.lessons.some(l => l.id === lesson.id));
+  const [next, setNext] = useState(null);
+  
+  // Resolve module: prefer lesson.module, fall back to matching module in static COURSE
+  const mod = lesson.module || COURSE.modules.find(m => m.lessons.some(l => l.id === lesson.id)) || COURSE.modules[0];
 
   // Quiz states
   const [quiz,    setQuiz]    = useState(null);
@@ -24,6 +25,36 @@ export default function LessonPage({ lesson, completed = {}, onComplete }) {
   const [quizAns, setQuizAns] = useState(null);
   const isMobile = useMediaQuery(isMobileMQ);
   const rPad = isMobile ? 16 : 36;
+
+  // Dynamically load next lesson
+  useEffect(() => {
+    async function loadNext() {
+      try {
+        const courses = await getCourses();
+        const allLessons = [];
+        courses.forEach(course => {
+          const details = getCourseDetails(course);
+          if (details && details.modules) {
+            details.modules.forEach(m => {
+              m.lessons.forEach(l => {
+                allLessons.push(l);
+              });
+            });
+          }
+        });
+        const allIds = allLessons.map(l => l.id);
+        const idx = allIds.indexOf(lesson.id);
+        if (idx !== -1 && idx < allLessons.length - 1) {
+          setNext(allLessons[idx + 1]);
+        } else {
+          setNext(null);
+        }
+      } catch (e) {
+        console.error("Error loading next lesson:", e);
+      }
+    }
+    loadNext();
+  }, [lesson.id]);
 
   useEffect(() => {
     setQuiz(null); setLoading(false); setErr('');

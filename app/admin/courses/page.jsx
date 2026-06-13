@@ -4,14 +4,7 @@ import { useState, useEffect } from 'react';
 import { Search, Plus, Edit2, Trash2, X, ChevronLeft, ChevronRight, GraduationCap } from 'lucide-react';
 import { T } from '@/lib/lms-data';
 import { useMediaQuery, isMobileMQ } from '@/lib/useMediaQuery';
-
-// Default demo courses
-const DEFAULT_COURSES = [
-  { id: '1', title: 'Course Title 1 Termaler 4', instructor: 'Administrator', category: 'Professionals', enrolled: 37, status: 'Published', date: 'Jan 11, 2023' },
-  { id: '2', title: 'Course Title 2', instructor: 'John Samoh', category: 'Collaborate', enrolled: 25, status: 'Draft', date: 'Jan 11, 2023' },
-  { id: '3', title: 'Course Title 3', instructor: 'John Smiths', category: 'Collaborate', enrolled: 12, status: 'Published', date: 'Jan 11, 2023' },
-  { id: '4', title: 'Course Title 4 Termales 5', instructor: 'John Sarith', category: 'Collaborate', enrolled: 18, status: 'Draft', date: 'Jan 11, 2023' },
-];
+import { getCourses, createCourse, updateCourse, deleteCourse } from '@/lib/frappe';
 
 export default function AdminCoursesPage() {
   const isMobile = useMediaQuery(isMobileMQ);
@@ -28,25 +21,12 @@ export default function AdminCoursesPage() {
   const [modalMode, setModalMode] = useState('create'); // 'create' or 'edit'
   const [currentCourse, setCurrentCourse] = useState({ id: '', title: '', instructor: '', category: 'Professionals', enrolled: 0, status: 'Draft', date: '' });
 
-  // Load courses
+  // Load courses via unified API client
   useEffect(() => {
-    const savedCourses = localStorage.getItem('admin_courses_list');
-    if (savedCourses) {
-      try {
-        setCourses(JSON.parse(savedCourses));
-      } catch (e) {
-        setCourses(DEFAULT_COURSES);
-      }
-    } else {
-      setCourses(DEFAULT_COURSES);
-      localStorage.setItem('admin_courses_list', JSON.stringify(DEFAULT_COURSES));
-    }
+    getCourses().then(setCourses);
   }, []);
 
-  const saveCourses = (newList) => {
-    setCourses(newList);
-    localStorage.setItem('admin_courses_list', JSON.stringify(newList));
-    
+  const updateChecklist = (newList) => {
     // Update Getting Started checklist 'course' step automatically if list is not empty
     const savedChecklist = localStorage.getItem('admin_getting_started');
     if (savedChecklist) {
@@ -75,30 +55,30 @@ export default function AdminCoursesPage() {
     setIsModalOpen(true);
   };
 
-  const handleDeleteCourse = (id) => {
+  const handleDeleteCourse = async (id) => {
     if (confirm('Are you sure you want to delete this course?')) {
-      const updated = courses.filter(c => c.id !== id);
-      saveCourses(updated);
+      const success = await deleteCourse(id);
+      if (success) {
+        const fresh = await getCourses();
+        setCourses(fresh);
+        updateChecklist(fresh);
+      }
     }
   };
 
-  const handleSaveCourseSubmit = (e) => {
+  const handleSaveCourseSubmit = async (e) => {
     e.preventDefault();
     if (!currentCourse.title.trim()) return;
 
     if (modalMode === 'create') {
-      const newCourse = {
-        ...currentCourse,
-        id: Date.now().toString(),
-        enrolled: Number(currentCourse.enrolled) || 0
-      };
-      const updated = [newCourse, ...courses];
-      saveCourses(updated);
+      await createCourse(currentCourse);
     } else {
-      const updated = courses.map(c => c.id === currentCourse.id ? { ...currentCourse, enrolled: Number(currentCourse.enrolled) || 0 } : c);
-      saveCourses(updated);
+      await updateCourse(currentCourse.id, currentCourse);
     }
     
+    const fresh = await getCourses();
+    setCourses(fresh);
+    updateChecklist(fresh);
     setIsModalOpen(false);
   };
 
