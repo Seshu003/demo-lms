@@ -1,52 +1,80 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
-  Brain, Loader2, Sparkles, CheckCircle, Circle,
-  ChevronRight, RotateCcw, Lightbulb, Lock, FlipHorizontal,
-  Paperclip, Mic, BookOpen, Image, HelpCircle, Send
+  Brain, Loader2, ChevronRight, Lock, FlipHorizontal,
+  Paperclip, Mic, Image, HelpCircle, Send, AlignLeft, Sparkles, ChevronLeft,
+  BookOpen, Code2, BarChart3, Home, Zap
 } from 'lucide-react';
-import { T, AGENT_META_FULL, run4Agents, parseOutput } from '@/lib/lms-data';
+import {
+  T, geminiCall,
+  classifyIntent, evaluateMath, getGreetingResponse, getThanksResponse,
+  buildChatPrompt, buildFeaturePrompt,
+  parseQuizOutput, parseFlashcardsOutput, parseInfographicOutput,
+  TUTOR_SYSTEM, QUIZ_SYSTEM, FLASHCARD_SYSTEM, INFOGRAPHIC_SYSTEM, SIMPLER_SYSTEM, EXAMPLES_SYSTEM,
+  MAX_TOKENS
+} from '@/lib/lms-data';
+import VoiceAgentView from '@/components/voice-tutor/VoiceAgentView';
+import UnifiedSidebar from '@/components/voice-tutor/UnifiedSidebar';
+import MobileNav from '@/components/MobileNav';
+import { useMediaQuery, isMobileMQ } from '@/lib/useMediaQuery';
 
-const MODES   = ['Beginner', 'Exam', 'Interview', 'Revision'];
+const MODES = ['Beginner', 'Exam', 'Interview', 'Revision'];
 const LENGTHS = ['Short', 'Medium', 'Deep'];
 const modeColors = { Beginner: T.green, Exam: T.accent, Interview: T.amber, Revision: T.purple };
 
-const QUICK_TABS = [
-  { id: 'explanation',  Icon: AlignLeft,  label: 'Explanation'  },
-  { id: 'infographic',  Icon: Image,      label: 'Infographic'  },
-  { id: 'quiz',         Icon: HelpCircle, label: 'Quiz'         },
-  { id: 'flashcards',   Icon: FlipHorizontal, label: 'Flashcards' },
+const SUGGESTIONS = [
+  { id: 'quiz', label: 'Quiz', Icon: HelpCircle, color: T.accent },
+  { id: 'flashcards', label: 'Flashcards', Icon: FlipHorizontal, color: T.purple },
+  { id: 'infographic', label: 'Visual Summary', Icon: Image, color: T.amber },
+  { id: 'simpler', label: 'Explain Simpler', Icon: AlignLeft, color: T.green },
+  { id: 'examples', label: 'Examples', Icon: Sparkles, color: T.accent },
 ];
 
-import { AlignLeft } from 'lucide-react';
-import VoiceAgentView from '@/components/voice-tutor/VoiceAgentView';
-import UnifiedSidebar from '@/components/voice-tutor/UnifiedSidebar';
-
 export default function GeneralTutor() {
-  const [topic,   setTopic]   = useState('');
-  const [mode,    setMode]    = useState('Beginner');
-  const [length,  setLength]  = useState('Medium');
-  const [agents,  setAgents]  = useState([{ s: 'idle' }, { s: 'idle' }, { s: 'idle' }, { s: 'idle' }]);
-  const [showVoiceAgent, setShowVoiceAgent] = useState(false);
-  const [result,  setResult]  = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [err,     setErr]     = useState('');
-  const [tab,     setTab]     = useState('explanation');
-  const [quizIdx, setQuizIdx] = useState(0);
-  const [quizAns, setQuizAns] = useState(null);
-  const [fcIdx,   setFcIdx]   = useState(0);
-  const [fcFlipped, setFcFlipped] = useState(false);
+  const [topic, setTopic] = useState('');
+  const [mode, setMode] = useState('Beginner');
+  const [length, setLength] = useState('Medium');
   const [messages, setMessages] = useState([]);
-  const chatRef   = useRef(null);
-  const inputRef  = useRef(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const [generating, setGenerating] = useState({ msgIdx: null, type: null });
+  const [streamingText, setStreamingText] = useState('');
+  const streamElRef = useRef(null);
+  const [showVoiceAgent, setShowVoiceAgent] = useState(false);
   const [textSessions, setTextSessions] = useState([]);
   const [voiceSessions, setVoiceSessions] = useState([]);
   const [currentSessionId, setCurrentSessionId] = useState(null);
+  const [voiceSessionToRestore, setVoiceSessionToRestore] = useState(null);
+  const chatRef = useRef(null);
+  const inputRef = useRef(null);
   const textSessKey = 'general-tutor-sessions';
   const voiceSessKey = 'voice-tutor-sessions';
 
-  // Load both session types from localStorage on mount
+  const isMobile = useMediaQuery(isMobileMQ);
+  const rPad = isMobile ? 14 : 28;
+  const rGap = isMobile ? 8 : 12;
+  const msgMaxW = isMobile ? '100%' : 720;
+  const bubbleMaxW = isMobile ? '100%' : 480;
+  const fCol = isMobile ? '1fr' : '1fr 1fr';
+
+  function getDateLabel(dateStr) {
+    if (!dateStr) return 'Older';
+    const date = new Date(dateStr);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const weekStart = new Date(today);
+    weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+    if (date >= today) return 'Today';
+    if (date >= yesterday) return 'Yesterday';
+    if (date >= weekStart) return 'This Week';
+    return 'Older';
+  }
+
   useEffect(() => {
     try {
       const raw1 = localStorage.getItem(textSessKey);
@@ -56,7 +84,6 @@ export default function GeneralTutor() {
     } catch {}
   }, []);
 
-  // Merge both session types sorted by most recent
   const mergedSessions = useMemo(() => {
     const text = (textSessions || []).map(s => ({ ...s, type: 'text' }));
     const voice = (voiceSessions || []).map(s => ({ ...s, type: 'voice' }));
@@ -69,7 +96,9 @@ export default function GeneralTutor() {
     return all;
   }, [textSessions, voiceSessions]);
 
-  const [voiceSessionToRestore, setVoiceSessionToRestore] = useState(null);
+  useEffect(() => {
+    if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
+  }, [messages, streamingText]);
 
   const handleSelectSession = useCallback((session) => {
     if (session.type === 'voice') {
@@ -77,582 +106,692 @@ export default function GeneralTutor() {
       setShowVoiceAgent(true);
       return;
     }
-    setMessages(session.messages || []);
-    setResult(session.result || null);
+    const msgs = (session.messages || []).map(m => ({
+      ...m,
+      features: m.features || {},
+    }));
+    setMessages(msgs);
     setMode(session.mode || 'Beginner');
     setLength(session.length || 'Medium');
-    setTab(session.tab || 'explanation');
     setCurrentSessionId(session.id);
-    setQuizIdx(0); setQuizAns(null); setFcIdx(0); setFcFlipped(false);
-    setErr(''); setAgents([{ s: 'idle' }, { s: 'idle' }, { s: 'idle' }, { s: 'idle' }]);
-    setTopic('');
+    setErr(''); setTopic('');
   }, []);
 
-  const handleGenerate = async () => {
-    if (!topic.trim()) return setErr('Please enter a topic.');
-    setErr(''); setResult(null); setLoading(true);
-    setAgents([{ s: 'idle' }, { s: 'idle' }, { s: 'idle' }, { s: 'idle' }]);
-    setMessages(prev => [...prev, { role: 'user', text: topic.trim(), mode, length }]);
-    try {
-      const finalText = await run4Agents(
-        topic.trim(), mode, length,
-        (i, status, out) => {
-          setAgents(prev => prev.map((a, idx) => idx === i ? { s: status, out } : a));
-          if (status === 'done' && i === 3) {
-            setTimeout(() => chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight, behavior: 'smooth' }), 200);
-          }
-        }
-      );
-      const parsed = parseOutput(finalText);
-      if (!parsed.explanation && !parsed.keyConcept) {
-        throw new Error('The AI returned an unexpected format. Please try again.');
+  const saveSession = useCallback((msgs) => {
+    if (!msgs.some(m => m.role === 'ai')) return;
+    const lastUserMsg = [...msgs].reverse().find(m => m.role === 'user');
+    const label = lastUserMsg ? lastUserMsg.content.slice(0, 40) : 'Untitled';
+    const sid = currentSessionId || Date.now().toString(36);
+    const session = {
+      id: sid, label, topic: label, mode, length,
+      messages: msgs,
+      timestamp: new Date().toISOString(),
+    };
+    const updated = [session, ...textSessions.filter(s => s.id !== sid)];
+    setTextSessions(updated);
+    setCurrentSessionId(sid);
+    try { localStorage.setItem(textSessKey, JSON.stringify(updated)); } catch {}
+  }, [mode, length, textSessions, currentSessionId, textSessKey]);
+
+  const FEATURE_SYSTEMS = {
+    quiz: QUIZ_SYSTEM, flashcards: FLASHCARD_SYSTEM, infographic: INFOGRAPHIC_SYSTEM,
+    simpler: SIMPLER_SYSTEM, examples: EXAMPLES_SYSTEM,
+  };
+
+  const FEATURE_LABELS = {
+    quiz: 'Quiz', flashcards: 'Flashcards', infographic: 'Visual Summary',
+    simpler: 'Simplified Explanation', examples: 'Examples',
+  };
+
+  const handleSend = async () => {
+    const raw = topic.trim();
+    if (!raw) return;
+    setTopic(''); setErr('');
+
+    const intent = classifyIntent(raw);
+    const userMsg = { id: Date.now().toString(36), role: 'user', content: raw, mode, length };
+    const msgsWithUser = [...messages, userMsg];
+
+    if (intent.type === 'greeting') {
+      const aiMsg = { id: (Date.now() + 1).toString(36), role: 'ai', content: getGreetingResponse(), local: true, features: {} };
+      const next = [...msgsWithUser, aiMsg];
+      setMessages(next); saveSession(next);
+      return;
+    }
+
+    if (intent.type === 'thanks') {
+      const aiMsg = { id: (Date.now() + 1).toString(36), role: 'ai', content: getThanksResponse(), local: true, features: {} };
+      const next = [...msgsWithUser, aiMsg];
+      setMessages(next); saveSession(next);
+      return;
+    }
+
+    if (intent.type === 'math') {
+      const result = evaluateMath(intent.expression);
+      const aiMsg = { id: (Date.now() + 1).toString(36), role: 'ai', content: `**${intent.expression}** = ${result}`, local: true, features: {} };
+      const next = [...msgsWithUser, aiMsg];
+      setMessages(next); saveSession(next);
+      return;
+    }
+
+    if (intent.type === 'feature') {
+      setMessages(msgsWithUser);
+      setLoading(true);
+      try {
+        const tokens = MAX_TOKENS[length.toLowerCase()] || 2000;
+        const prompt = buildFeaturePrompt(intent.feature, intent.topic, mode);
+        const system = FEATURE_SYSTEMS[intent.feature] || TUTOR_SYSTEM;
+        const text = await geminiCall(system, prompt, tokens);
+        if (!text.trim()) throw new Error('Gemini returned an empty response. Try rephrasing.');
+        const features = {};
+        if (intent.feature === 'quiz') features.quiz = { questions: parseQuizOutput(text), currentIdx: 0, currentAnswer: null };
+        else if (intent.feature === 'flashcards') features.flashcards = { cards: parseFlashcardsOutput(text), currentIdx: 0, flipped: false };
+        else if (intent.feature === 'infographic') features.infographic = { points: parseInfographicOutput(text) };
+        else if (intent.feature === 'simpler') features.simpler = { text };
+        else if (intent.feature === 'examples') features.examples = { text };
+        const label = FEATURE_LABELS[intent.feature] || 'response';
+        const aiMsg = { id: (Date.now() + 1).toString(36), role: 'ai', content: `Here's a ${label} on ${intent.topic}:`, features };
+        const next = [...msgsWithUser, aiMsg];
+        setMessages(next); saveSession(next);
+      } catch (e) {
+        setErr(e.message || 'Error generating feature.');
+      } finally {
+        setLoading(false);
       }
-      setResult(parsed);
-      setTab('explanation');
-      setQuizIdx(0); setQuizAns(null); setFcIdx(0); setFcFlipped(false);
-      const newMessages = [...messages, { role: 'user', text: topic.trim(), mode, length }, { role: 'ai', text: parsed.explanation }];
-      setMessages(newMessages);
-      // Save session with the new data
-      const label = topic.trim().slice(0, 40) || 'Untitled';
-      const sid = currentSessionId || Date.now().toString(36);
-      const session = { id: sid, label, topic: topic.trim(), mode, length, messages: newMessages, result: parsed, tab: 'explanation', timestamp: new Date().toISOString() };
-      const updated = [session, ...textSessions.filter(s => s.id !== sid)];
-      setTextSessions(updated);
-      setCurrentSessionId(sid);
-      try { localStorage.setItem(textSessKey, JSON.stringify(updated)); } catch {}
+      return;
+    }
+
+    setMessages(msgsWithUser);
+    setStreamingText(' ');
+    setLoading(true);
+
+    try {
+      const tokens = MAX_TOKENS[length.toLowerCase()] || 800;
+      const prompt = buildChatPrompt(raw, mode, length);
+      const res = await fetch('/api/gemini/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ system: TUTOR_SYSTEM, user: prompt, maxOutputTokens: tokens }),
+      });
+      if (!res.ok) {
+        let errMsg = `HTTP ${res.status}`;
+        try { const d = await res.json(); errMsg = d.error || errMsg; } catch {}
+        throw new Error(errMsg);
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        fullText += decoder.decode(value, { stream: true });
+        if (streamElRef.current) {
+          streamElRef.current.textContent = fullText;
+        }
+      }
+      if (!fullText.trim()) {
+        throw new Error('Gemini returned an empty response — the content may have been blocked by safety filters. Try rephrasing your question.');
+      }
+      const aiMsg = { id: (Date.now() + 1).toString(36), role: 'ai', content: fullText, features: {} };
+      const next = [...msgsWithUser, aiMsg];
+      setMessages(next);
+      setStreamingText('');
+      saveSession(next);
     } catch (e) {
-      setErr(e.message || 'Error reaching the backend.');
+      setErr(e.message || 'Error generating response.');
+      setStreamingText('');
     } finally {
       setLoading(false);
-      setTopic('');
     }
   };
 
-  // ── Quiz answer handler ──
-  const handleQuizAnswer = (oi) => {
-    if (quizAns !== null) return;
-    setQuizAns(oi);
+  const handleGenerateFeature = async (msgIdx, type) => {
+    if (generating.msgIdx === msgIdx && generating.type === type) return;
+    const msg = messages[msgIdx];
+    if (!msg || msg.role !== 'ai') return;
+
+    setGenerating({ msgIdx, type });
+    try {
+      const system = FEATURE_SYSTEMS[type] || TUTOR_SYSTEM;
+      const prompt = buildFeaturePrompt(type, msg.content, mode);
+      const tokens = type === 'simpler' || type === 'examples' ? 1000 : 1500;
+      const text = await geminiCall(system, prompt, tokens);
+      if (!text.trim()) throw new Error(`Gemini returned an empty response for ${type}. Try again.`);
+
+      setMessages(prev => prev.map((m, i) => {
+        if (i !== msgIdx) return m;
+        const f = { ...m.features };
+        if (type === 'quiz') f.quiz = { questions: parseQuizOutput(text), currentIdx: 0, currentAnswer: null };
+        else if (type === 'flashcards') f.flashcards = { cards: parseFlashcardsOutput(text), currentIdx: 0, flipped: false };
+        else if (type === 'infographic') f.infographic = { points: parseInfographicOutput(text) };
+        else if (type === 'simpler') f.simpler = { text };
+        else if (type === 'examples') f.examples = { text };
+        return { ...m, features: f };
+      }));
+    } catch (e) {
+      setErr(`Failed to generate ${type}: ${e.message}`);
+    } finally {
+      setGenerating({ msgIdx: null, type: null });
+    }
+  };
+
+  const handleQuizAnswer = (msgIdx, answerIdx) => {
+    setMessages(prev => prev.map((m, i) => {
+      if (i !== msgIdx || !m.features.quiz) return m;
+      if (m.features.quiz.currentAnswer !== null) return m;
+      return { ...m, features: { ...m.features, quiz: { ...m.features.quiz, currentAnswer: answerIdx } } };
+    }));
+  };
+
+  const handleQuizNav = (msgIdx, dir) => {
+    setMessages(prev => prev.map((m, i) => {
+      if (i !== msgIdx || !m.features.quiz) return m;
+      const q = m.features.quiz;
+      const max = q.questions.length - 1;
+      const next = dir === 'next' ? Math.min(q.currentIdx + 1, max) : Math.max(q.currentIdx - 1, 0);
+      return { ...m, features: { ...m.features, quiz: { ...q, currentIdx: next, currentAnswer: null } } };
+    }));
+  };
+
+  const handleFlashcardFlip = (msgIdx) => {
+    setMessages(prev => prev.map((m, i) => {
+      if (i !== msgIdx || !m.features.flashcards) return m;
+      return { ...m, features: { ...m.features, flashcards: { ...m.features.flashcards, flipped: !m.features.flashcards.flipped } } };
+    }));
+  };
+
+  const handleFlashcardNav = (msgIdx, dir) => {
+    setMessages(prev => prev.map((m, i) => {
+      if (i !== msgIdx || !m.features.flashcards) return m;
+      const fc = m.features.flashcards;
+      const len = fc.cards.length;
+      const next = dir === 'next' ? (fc.currentIdx + 1) % len : (fc.currentIdx - 1 + len) % len;
+      return { ...m, features: { ...m.features, flashcards: { ...fc, currentIdx: next, flipped: false } } };
+    }));
+  };
+
+  const isGeneratingFeature = (mi, type) => generating.msgIdx === mi && generating.type === type;
+
+  const featureExists = (msg, type) => {
+    if (type === 'quiz') return !!msg.features?.quiz;
+    if (type === 'flashcards') return !!msg.features?.flashcards;
+    if (type === 'infographic') return !!msg.features?.infographic;
+    if (type === 'simpler') return !!msg.features?.simpler;
+    if (type === 'examples') return !!msg.features?.examples;
+    return false;
+  };
+
+  const tutorNavItems = [
+    { href: '/',              Icon: Home,      label: 'Dashboard'     },
+    { href: '/courses',       Icon: BookOpen,  label: 'Courses'       },
+    { href: '/coding-tutor',  Icon: Code2,     label: 'Coding Tutor'  },
+    { href: '/progress',      Icon: BarChart3, label: 'Progress'      },
+  ];
+
+  const tutorExtras = (close) => {
+    const items = [];
+
+    // Mode select
+    items.push(
+      <div key="mode-select">
+        <label style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>LEARNING MODE</label>
+        <select value={mode} onChange={e => setMode(e.target.value)}
+          style={{ width: '100%', appearance: 'none', background: T.s2, border: `1px solid ${modeColors[mode] + '50' || T.border}`, borderRadius: 8, padding: '8px 12px', color: modeColors[mode] || T.text, fontSize: 13, fontWeight: 600, cursor: 'pointer', outline: 'none', fontFamily: 'inherit' }}>
+          {MODES.map(m => <option key={m} value={m} style={{ background: T.s1, color: T.text }}>{m}</option>)}
+        </select>
+      </div>
+    );
+
+    // Length select
+    items.push(
+      <div key="len-select">
+        <label style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>RESPONSE DEPTH</label>
+        <select value={length} onChange={e => setLength(e.target.value)}
+          style={{ width: '100%', appearance: 'none', background: T.s2, border: `1px solid ${length === 'Short' ? T.amber + '50' : length === 'Medium' ? T.accent + '50' : T.purple + '50'}`, borderRadius: 8, padding: '8px 12px', color: length === 'Short' ? T.amber : length === 'Medium' ? T.accent : T.purple, fontSize: 13, fontWeight: 600, cursor: 'pointer', outline: 'none', fontFamily: 'inherit' }}>
+          {LENGTHS.map(l => <option key={l} value={l} style={{ background: T.s1, color: T.text }}>{l}</option>)}
+        </select>
+      </div>
+    );
+
+    // Session history (mobile only)
+    if (isMobile && mergedSessions?.length > 0) {
+      const groups = {};
+      const ordered = ['Today', 'Yesterday', 'This Week', 'Older'];
+      for (const s of mergedSessions) {
+        const label = getDateLabel(s.timestamp || s.startedAt);
+        if (!groups[label]) groups[label] = [];
+        groups[label].push(s);
+      }
+      for (const key of Object.keys(groups)) {
+        groups[key].sort((a, b) => {
+          return new Date(b.timestamp || b.startedAt).getTime() - new Date(a.timestamp || a.startedAt).getTime();
+        });
+      }
+
+      items.push(
+        <div key="sessions">
+          <div style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: '0.06em', marginBottom: 8 }}>SESSION HISTORY</div>
+          {ordered.map(group => {
+            const sList = groups[group];
+            if (!sList) return null;
+            return (
+              <div key={group} style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 10, color: T.dim, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '0 4px', marginBottom: 4 }}>{group}</div>
+                {sList.map(session => {
+                  const isActive = session.id === currentSessionId;
+                  const isVoice = session.type === 'voice';
+                  return (
+                    <button key={session.type + '-' + session.id}
+                      onClick={() => {
+                        if (isVoice) {
+                          setVoiceSessionToRestore(session);
+                          setShowVoiceAgent(true);
+                        } else {
+                          const msgs = (session.messages || []).map(m => ({ ...m, features: m.features || {} }));
+                          setMessages(msgs);
+                          setMode(session.mode || 'Beginner');
+                          setLength(session.length || 'Medium');
+                          setCurrentSessionId(session.id);
+                          setErr(''); setTopic('');
+                        }
+                        if (close) close();
+                      }}
+                      style={{
+                        width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 8, border: 'none',
+                        background: isActive ? `${T.accent}15` : 'transparent',
+                        color: isActive ? T.text : T.muted, cursor: 'pointer', fontSize: 12,
+                        display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'inherit',
+                      }}>
+                      <span style={{
+                        width: 20, height: 20, borderRadius: 6,
+                        background: isVoice ? `${T.accent}20` : `${T.purple}20`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+                      }}>
+                        {isVoice ? <Zap size={11} color={T.accent} /> : <Brain size={11} color={T.purple} />}
+                      </span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: isActive ? 600 : 400, flex: 1 }}>
+                        {session.label || 'Untitled'}
+                      </span>
+                      <span style={{ fontSize: 9, color: T.dim, flexShrink: 0 }}>{isVoice ? 'Voice' : 'Text'}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    return items;
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
   };
 
   return (
-    <div style={{ display: 'flex', height: '100vh', background: T.bg, overflow: 'hidden' }}>
-
-      <UnifiedSidebar
-        sessions={mergedSessions}
-        onSelectSession={handleSelectSession}
-        currentSessionId={currentSessionId}
-      />
-
+    <>
+      <MobileNav title="General Tutor" accent={T.purple} items={tutorNavItems} extras={tutorExtras} />
+      <div style={{ display: 'flex', height: '100vh', background: T.bg, overflow: 'hidden' }}>
+        {!isMobile && (
+          <UnifiedSidebar
+            sessions={mergedSessions}
+            onSelectSession={handleSelectSession}
+            currentSessionId={currentSessionId}
+            showMenuButton={false}
+          />
+        )}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-      {/* ── HEADER ── */}
-      <div style={{ padding: '14px 28px', borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, background: T.s1 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{
-            width: 38, height: 38, borderRadius: 10,
-            background: `${T.purple}18`, border: `1px solid ${T.purple}35`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center'
-          }}>
-            <Brain size={18} color={T.purple} />
-          </div>
-          <div>
-            <h2 style={{ color: T.text, fontSize: 18, fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>General Tutor</h2>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-              <div style={{ width: 6, height: 6, borderRadius: '50%', background: T.green, flexShrink: 0 }} />
-              <span style={{ fontSize: 11, color: T.muted, fontWeight: 500 }}>AI Tutor · Online</span>
-              <Lock size={10} color={T.dim} />
+        {/* ── HEADER ── */}
+        <div style={{ padding: isMobile ? '10px 14px' : '14px 28px', borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, background: T.s1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: rGap }}>
+            <div style={{ width: isMobile ? 32 : 38, height: isMobile ? 32 : 38, borderRadius: 10, background: `${T.purple}18`, border: `1px solid ${T.purple}35`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Brain size={isMobile ? 15 : 18} color={T.purple} />
+            </div>
+            <div>
+              <h2 style={{ color: T.text, fontSize: isMobile ? 15 : 18, fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>General Tutor</h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: T.green, flexShrink: 0 }} />
+                <span style={{ fontSize: 11, color: T.muted, fontWeight: 500 }}>AI Tutor</span>
+                <Lock size={10} color={T.dim} />
+              </div>
             </div>
           </div>
-        </div>
-        {/* Mode / Depth selectors moved to bottom */}
-      </div>
-
-      {/* ── CHAT AREA ── */}
-      <div ref={chatRef} style={{ flex: 1, overflowY: 'auto', padding: '28px 28px 16px' }}>
-
-        {/* Welcome AI message (always visible) */}
-        <div style={{ display: 'flex', gap: 12, marginBottom: 24, maxWidth: 720 }}>
-          <div style={{
-            width: 36, height: 36, borderRadius: '50%',
-            background: `${T.purple}25`, border: `1px solid ${T.purple}40`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
-          }}>
-            <Brain size={16} color={T.purple} />
-          </div>
-          <div>
-            <div style={{ fontSize: 11, color: T.purple, fontWeight: 700, letterSpacing: '0.05em', marginBottom: 4 }}>LMS AI TUTOR</div>
-            <div style={{ color: T.text, fontSize: 14, lineHeight: 1.7 }}>
-              Hello! I'm your AI learning assistant. Tell me what you'd like to learn and I'll create personalised explanations, infographics, quizzes, and flashcards just for you.
-            </div>
-          </div>
+          {isMobile && streamingText && (
+            <Loader2 size={14} color={T.accent} style={{ animation: 'spin 1s linear infinite' }} />
+          )}
         </div>
 
-        {/* Conversation messages */}
-        {messages.map((msg, mi) => (
-          <div key={mi} style={{ marginBottom: 20 }}>
-            {msg.role === 'user' ? (
-              /* ── User bubble (right-aligned) ── */
-              <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', maxWidth: 720, marginLeft: 'auto' }}>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: '0.04em', marginBottom: 4 }}>YOU</div>
-                  <div style={{
-                    background: T.s3, border: `1px solid ${T.border}`, borderRadius: '14px 14px 4px 14px',
-                    padding: '12px 16px', color: T.text, fontSize: 14, lineHeight: 1.65, maxWidth: 480
-                  }}>
-                    {msg.text}
-                  </div>
-                  <div style={{ fontSize: 10, color: T.dim, marginTop: 4 }}>{msg.mode} · {msg.length}</div>
-                </div>
-                <div style={{
-                  width: 34, height: 34, borderRadius: '50%', background: T.s3,
-                  border: `1px solid ${T.border}`, display: 'flex', alignItems: 'center',
-                  justifyContent: 'center', flexShrink: 0, fontSize: 13, color: T.muted, fontWeight: 700
-                }}>S</div>
-              </div>
-            ) : (
-              /* ── AI bubble (left-aligned) ── */
-              <div style={{ display: 'flex', gap: 12, maxWidth: 720 }}>
-                <div style={{
-                  width: 36, height: 36, borderRadius: '50%',
-                  background: `${T.purple}25`, border: `1px solid ${T.purple}40`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
-                }}>
-                  <Brain size={16} color={T.purple} />
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, color: T.purple, fontWeight: 700, letterSpacing: '0.05em', marginBottom: 4 }}>LMS AI TUTOR</div>
-                  <div style={{ color: T.text, fontSize: 14, lineHeight: 1.7 }}>
-                    {msg.text || "I've prepared your learning content below. Explore each section!"}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
+        {/* ── CHAT AREA ── */}
+        <div ref={chatRef} style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '16px 14px 10px' : '28px 28px 16px' }}>
 
-        {/* ── AGENT PIPELINE ── */}
-        {loading && (
-          <div style={{ maxWidth: 720, marginBottom: 20 }}>
-            <div style={{ display: 'flex', gap: 12 }}>
-              <div style={{
-                width: 36, height: 36, borderRadius: '50%',
-                background: `${T.purple}25`, border: `1px solid ${T.purple}40`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
-              }}>
-                <Brain size={16} color={T.purple} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 11, color: T.purple, fontWeight: 700, letterSpacing: '0.05em', marginBottom: 8 }}>LMS AI TUTOR</div>
-                <div style={{ fontSize: 11, color: T.muted, marginBottom: 10, fontWeight: 600, letterSpacing: '0.06em' }}>4-AGENT PIPELINE PROCESSING…</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8 }}>
-                  {AGENT_META_FULL.map((ag, i) => {
-                    const s = agents[i]?.s;
-                    const { Icon } = ag;
-                    const isActive = s === 'loading';
-                    const isDone   = s === 'done';
-                    return (
-                      <div key={i} style={{
-                        background: isDone ? `${ag.color}10` : isActive ? `${ag.color}08` : T.s3,
-                        border: `1px solid ${isDone ? ag.color + '40' : isActive ? ag.color + '30' : T.border}`,
-                        borderRadius: 10, padding: '10px 12px', transition: 'all 0.3s'
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                          <div style={{ width: 22, height: 22, borderRadius: 6, background: `${ag.color}20`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <Icon size={11} color={ag.color} />
-                          </div>
-                          {isDone ? <CheckCircle size={12} color={T.green} /> :
-                            isActive ? <Loader2 size={12} color={ag.color} style={{ animation: 'spin 1s linear infinite' }} /> :
-                              <Circle size={12} color={T.dim} />}
-                        </div>
-                        <div style={{ fontSize: 11, color: isDone ? T.text : T.muted, fontWeight: isDone || isActive ? 600 : 400, lineHeight: 1.2 }}>{ag.name}</div>
-                        <div style={{ fontSize: 10, color: T.muted, marginTop: 2 }}>{ag.desc}</div>
-                      </div>
-                    );
-                  })}
-                </div>
+          {/* Welcome AI message */}
+          <div style={{ display: 'flex', gap: rGap, marginBottom: 24, maxWidth: msgMaxW }}>
+            <div style={{ width: isMobile ? 30 : 36, height: isMobile ? 30 : 36, borderRadius: '50%', background: `${T.purple}25`, border: `1px solid ${T.purple}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Brain size={isMobile ? 14 : 16} color={T.purple} />
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: T.purple, fontWeight: 700, letterSpacing: '0.05em', marginBottom: 4 }}>LMS AI TUTOR</div>
+              <div style={{ color: T.text, fontSize: 14, lineHeight: 1.7 }}>
+                Hello! I'm your AI learning assistant. Tell me what you'd like to learn and I'll create a personalised explanation. You can also generate quizzes, flashcards, and infographics on demand.
               </div>
             </div>
           </div>
-        )}
 
-        {err && (
-          <div style={{ maxWidth: 720, marginBottom: 16, color: T.red, fontSize: 12, background: `${T.red}12`, padding: '10px 14px', borderRadius: 8, border: `1px solid ${T.red}30` }}>
-            ⚠️ {err}
-          </div>
-        )}
-
-        {/* ── RESULTS CARD ── */}
-        {result && (
-          <div style={{
-            maxWidth: 820, background: T.s1, border: `1px solid ${T.border}`,
-            borderRadius: 14, overflow: 'hidden', marginBottom: 16
-          }}>
-            {/* Key concept banner */}
-            {result.keyConcept && (
-              <div style={{ background: `${T.purple}14`, borderBottom: `1px solid ${T.purple}25`, padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                <Lightbulb size={15} color={T.purple} />
-                <span style={{ fontSize: 13, color: T.purple, fontWeight: 600 }}>{result.keyConcept}</span>
-              </div>
-            )}
-
-            {/* Tab bar */}
-            <div style={{ display: 'flex', borderBottom: `1px solid ${T.border}`, padding: '0 8px' }}>
-              {QUICK_TABS.map(({ id, Icon, label }) => (
-                <button key={id} onClick={() => setTab(id)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 7, padding: '12px 14px',
-                    background: 'transparent', border: 'none',
-                    borderBottom: `2px solid ${tab === id ? T.accent : 'transparent'}`,
-                    color: tab === id ? T.accent : T.muted, cursor: 'pointer',
-                    fontSize: 13, fontWeight: tab === id ? 600 : 400, transition: 'all 0.15s'
-                  }}>
-                  <Icon size={14} />{label}
-                  {id === 'quiz' && result.quizQuestions?.length > 0 && (
-                    <span style={{ fontSize: 10, background: `${T.accent}25`, color: T.accent, borderRadius: 9, padding: '1px 6px' }}>{result.quizQuestions.length}</span>
-                  )}
-                  {id === 'flashcards' && result.flashcards?.length > 0 && (
-                    <span style={{ fontSize: 10, background: `${T.green}25`, color: T.green, borderRadius: 9, padding: '1px 6px' }}>{result.flashcards.length}</span>
-                  )}
-                </button>
-              ))}
-            </div>
-
-            <div style={{ padding: '20px' }}>
-              {/* ── Explanation tab ── */}
-              {tab === 'explanation' && (
-                <div>
-                  <div style={{ color: T.text, fontSize: 14, lineHeight: 1.85, whiteSpace: 'pre-wrap', marginBottom: 16 }}>
-                    {result.explanation || <span style={{ color: T.muted, fontStyle: 'italic' }}>No explanation returned. Try again.</span>}
-                  </div>
-                  {result.analogy && (
-                    <div style={{ background: `${T.amber}10`, border: `1px solid ${T.amber}25`, borderRadius: 10, padding: '14px 16px', display: 'flex', gap: 10 }}>
-                      <span style={{ fontSize: 18 }}>💡</span>
-                      <div>
-                        <div style={{ fontSize: 12, color: T.amber, fontWeight: 600, marginBottom: 4 }}>ANALOGY</div>
-                        <div style={{ color: T.muted, fontSize: 13, lineHeight: 1.65 }}>{result.analogy}</div>
-                      </div>
+          {/* Conversation messages */}
+          {messages.map((msg, mi) => (
+            <div key={msg.id || mi} style={{ marginBottom: 20 }}>
+              {/* ── User message ── */}
+              {msg.role === 'user' && (
+                <div style={{ display: 'flex', gap: rGap, justifyContent: 'flex-end', maxWidth: msgMaxW, marginLeft: 'auto' }}>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: '0.04em', marginBottom: 4 }}>YOU</div>
+                    <div style={{ background: T.s3, border: `1px solid ${T.border}`, borderRadius: '14px 14px 4px 14px', padding: '10px 14px', color: T.text, fontSize: 14, lineHeight: 1.65, maxWidth: bubbleMaxW }}>
+                      {msg.content}
                     </div>
-                  )}
+                    <div style={{ fontSize: 10, color: T.dim, marginTop: 4 }}>{msg.mode} &middot; {msg.length}</div>
+                  </div>
+                  <div style={{ width: 34, height: 34, borderRadius: '50%', background: T.s3, border: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 13, color: T.muted, fontWeight: 700 }}>S</div>
                 </div>
               )}
 
-              {/* ── Infographic tab ── */}
-              {tab === 'infographic' && (
-                <div>
-                  {result.infoPoints?.length > 0 ? (
-                    <>
-                      <div style={{ fontSize: 13, color: T.muted, marginBottom: 16 }}>Key concepts at a glance</div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                        {result.infoPoints.map((pt, i) => {
-                          const colors = [T.accent, T.green, T.purple, T.amber, T.red];
-                          const icons  = ['🎯', '📌', '⚡', '🔑', '🌟', '💎', '🧩', '🚀'];
-                          const c = colors[i % colors.length];
+              {/* ── AI message ── */}
+              {msg.role === 'ai' && (
+                <div style={{ display: 'flex', gap: rGap, maxWidth: msgMaxW }}>
+                  <div style={{ width: isMobile ? 30 : 36, height: isMobile ? 30 : 36, borderRadius: '50%', background: `${T.purple}25`, border: `1px solid ${T.purple}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Brain size={isMobile ? 14 : 16} color={T.purple} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 11, color: T.purple, fontWeight: 700, letterSpacing: '0.05em', marginBottom: 4 }}>LMS AI TUTOR</div>
+                    <div style={{ color: T.text, fontSize: 14, lineHeight: 1.7 }}>
+                      <div className="md-content">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                      </div>
+                    </div>
+
+                    {/* ── Rendered features ── */}
+                    {msg.features?.quiz?.questions?.length > 0 && (
+                      <div style={{ marginTop: 16, background: T.s1, border: `1px solid ${T.border}`, borderRadius: 12, padding: 20 }}>
+                        {(() => {
+                          const q = msg.features.quiz;
+                          const question = q.questions[q.currentIdx];
+                          if (!question) return null;
                           return (
-                            <div key={i} style={{ background: T.s3, border: `1px solid ${c}25`, borderRadius: 11, padding: '16px', position: 'relative', overflow: 'hidden' }}>
-                              <div style={{ position: 'absolute', top: -12, right: -12, width: 64, height: 64, borderRadius: '50%', background: `${c}08` }} />
-                              <div style={{ fontSize: 22, marginBottom: 8 }}>{icons[i % icons.length]}</div>
-                              <div style={{ color: T.text, fontSize: 13, lineHeight: 1.6, fontWeight: 500 }}>{pt}</div>
-                              <div style={{ position: 'absolute', bottom: 0, left: 0, height: 3, width: '100%', background: `linear-gradient(90deg,${c},transparent)` }} />
-                            </div>
+                            <>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                                <span style={{ fontSize: 12, color: T.muted }}>Question {q.currentIdx + 1} of {q.questions.length}</span>
+                                <button onClick={() => handleGenerateFeature(mi, 'quiz')}
+                                  style={{ background: 'none', border: `1px solid ${T.border}`, color: T.muted, borderRadius: 6, padding: '3px 10px', fontSize: 11, cursor: 'pointer' }}>
+                                  Regenerate
+                                </button>
+                              </div>
+                              <div style={{ color: T.text, fontSize: 14, fontWeight: 600, marginBottom: 14, lineHeight: 1.5 }}>{question.question}</div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                                {question.options.map((opt, oi) => {
+                                  const answered = q.currentAnswer !== null;
+                                  const selected = q.currentAnswer === oi;
+                                  const correct = oi === question.correct;
+                                  let bg = T.s3, bd = T.border, cl = T.muted;
+                                  if (answered && correct) { bg = `${T.green}18`; bd = `${T.green}50`; cl = T.green; }
+                                  else if (answered && selected) { bg = `${T.red}18`; bd = `${T.red}50`; cl = T.red; }
+                                  else if (selected) { bg = `${T.accent}18`; bd = `${T.accent}50`; cl = T.accent; }
+                                  return (
+                                    <button key={oi} onClick={() => handleQuizAnswer(mi, oi)} disabled={answered}
+                                      style={{ background: bg, border: `1px solid ${bd}`, borderRadius: 9, padding: '10px 14px', color: cl, fontSize: 13, cursor: answered ? 'default' : 'pointer', textAlign: 'left', transition: 'all 0.15s' }}>
+                                      <span style={{ fontWeight: 700, marginRight: 8 }}>{'ABCD'[oi]})</span>{opt}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              {q.currentAnswer !== null && (
+                                <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span style={{ fontSize: 13, color: q.currentAnswer === question.correct ? T.green : T.red, fontWeight: 600 }}>
+                                    {q.currentAnswer === question.correct ? '\u2713 Correct!' : `\u2717 Incorrect \u2014 correct: ${'ABCD'[question.correct]}`}
+                                  </span>
+                                  <div style={{ display: 'flex', gap: 8 }}>
+                                    {q.currentIdx > 0 && (
+                                      <button onClick={() => handleQuizNav(mi, 'prev')}
+                                        style={{ background: T.s3, border: `1px solid ${T.border}`, color: T.muted, borderRadius: 7, padding: '6px 14px', fontSize: 12, cursor: 'pointer' }}>
+                                        \u2190 Prev
+                                      </button>
+                                    )}
+                                    {q.currentIdx < q.questions.length - 1 && (
+                                      <button onClick={() => handleQuizNav(mi, 'next')}
+                                        style={{ background: T.accent, color: '#fff', border: 'none', borderRadius: 7, padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
+                                        Next <ChevronRight size={12} />
+                                      </button>
+                                    )}
+                                    {q.currentIdx === q.questions.length - 1 && (
+                                      <span style={{ fontSize: 12, color: T.muted }}>Quiz complete!</span>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </>
                           );
-                        })}
+                        })()}
                       </div>
-                    </>
-                  ) : (
-                    <div style={{ color: T.muted, fontSize: 13, textAlign: 'center', padding: '32px 0' }}>
-                      No infographic points were generated. Try regenerating with a different depth.
-                    </div>
-                  )}
-                </div>
-              )}
+                    )}
 
-              {/* ── Quiz tab ── */}
-              {tab === 'quiz' && (
-                <div>
-                  {result.quizQuestions?.length > 0 ? (() => {
-                    const q = result.quizQuestions[quizIdx];
-                    return q ? (
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                          <div style={{ fontSize: 13, color: T.muted }}>Question {quizIdx + 1} of {result.quizQuestions.length}</div>
-                          <button onClick={() => { setQuizIdx(0); setQuizAns(null); }}
-                            style={{ background: 'none', border: `1px solid ${T.border}`, color: T.muted, borderRadius: 7, padding: '4px 10px', fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
-                            <RotateCcw size={11} />Reset
+                    {msg.features?.flashcards?.cards?.length > 0 && (
+                      <div style={{ marginTop: 16, background: T.s1, border: `1px solid ${T.border}`, borderRadius: 12, padding: 20 }}>
+                        {(() => {
+                          const fc = msg.features.flashcards;
+                          const card = fc.cards[fc.currentIdx];
+                          if (!card) return null;
+                          return (
+                            <>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                                <span style={{ fontSize: 12, color: T.muted }}>Card {fc.currentIdx + 1} of {fc.cards.length}</span>
+                                <button onClick={() => handleGenerateFeature(mi, 'flashcards')}
+                                  style={{ background: 'none', border: `1px solid ${T.border}`, color: T.muted, borderRadius: 6, padding: '3px 10px', fontSize: 11, cursor: 'pointer' }}>
+                                  Regenerate
+                                </button>
+                              </div>
+                              <div onClick={() => handleFlashcardFlip(mi)} style={{ cursor: 'pointer' }}>
+                                <div style={{ background: fc.flipped ? `${T.purple}15` : T.s3, border: `1px solid ${fc.flipped ? T.purple + '40' : T.border}`, borderRadius: 14, padding: '32px 24px', minHeight: 120, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', transition: 'all 0.3s' }}>
+                                  <div style={{ fontSize: 11, color: T.muted, letterSpacing: '0.08em', marginBottom: 10, textTransform: 'uppercase' }}>
+                                    {fc.flipped ? 'Answer' : 'Question \u2014 tap to reveal'}
+                                  </div>
+                                  <div style={{ fontSize: 15, color: T.text, fontWeight: fc.flipped ? 400 : 600, lineHeight: 1.6 }}>
+                                    {fc.flipped ? card.back : card.front}
+                                  </div>
+                                  {!fc.flipped && <div style={{ marginTop: 12, fontSize: 11, color: T.dim }}>tap to flip</div>}
+                                </div>
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 12 }}>
+                                <button onClick={() => handleFlashcardNav(mi, 'prev')}
+                                  style={{ background: T.s3, border: `1px solid ${T.border}`, color: T.muted, borderRadius: 8, padding: '7px 16px', cursor: 'pointer', fontSize: 13 }}>
+                                  \u2190 Prev
+                                </button>
+                                <button onClick={() => handleFlashcardNav(mi, 'next')}
+                                  style={{ background: T.s3, border: `1px solid ${T.border}`, color: T.muted, borderRadius: 8, padding: '7px 16px', cursor: 'pointer', fontSize: 13 }}>
+                                  Next \u2192
+                                </button>
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'center', gap: 5, marginTop: 8 }}>
+                                {fc.cards.map((_, i) => (
+                                  <div key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: fc.currentIdx === i ? T.purple : T.dim, transition: 'all 0.2s' }} />
+                                ))}
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
+
+                    {msg.features?.infographic?.points?.length > 0 && (
+                      <div style={{ marginTop: 16, background: T.s1, border: `1px solid ${T.border}`, borderRadius: 12, padding: 20 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                          <span style={{ fontSize: 12, color: T.muted }}>Key concepts at a glance</span>
+                          <button onClick={() => handleGenerateFeature(mi, 'infographic')}
+                            style={{ background: 'none', border: `1px solid ${T.border}`, color: T.muted, borderRadius: 6, padding: '3px 10px', fontSize: 11, cursor: 'pointer' }}>
+                            Regenerate
                           </button>
                         </div>
-                        <div style={{ color: T.text, fontSize: 15, fontWeight: 600, marginBottom: 16, lineHeight: 1.5 }}>{q.question}</div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                          {q.options.map((opt, oi) => {
-                            const isSelected = quizAns === oi;
-                            const isCorrect  = oi === q.correct;
-                            const showResult = quizAns !== null;
-                            let bg = T.s3, border = T.border, color = T.muted;
-                            if (showResult && isCorrect)       { bg = `${T.green}18`;  border = `${T.green}50`;  color = T.green; }
-                            else if (showResult && isSelected)  { bg = `${T.red}18`;    border = `${T.red}50`;    color = T.red; }
-                            else if (!showResult && isSelected) { bg = `${T.accent}18`; border = `${T.accent}50`; color = T.accent; }
+                        <div style={{ display: 'grid', gridTemplateColumns: fCol, gap: 10 }}>
+                          {msg.features.infographic.points.map((pt, i) => {
+                            const colors = [T.accent, T.green, T.purple, T.amber, T.red];
+                            const icons = ['\uD83C\uDFAF', '\uD83D\uDCCC', '\u26A1', '\uD83D\uDD11', '\uD83C\uDF1F', '\uD83D\uDC8E', '\uD83E\uDDE9', '\uD83D\uDE80'];
+                            const c = colors[i % colors.length];
                             return (
-                              <button key={oi}
-                                onClick={() => handleQuizAnswer(oi)}
-                                disabled={quizAns !== null}
-                                style={{ background: bg, border: `1px solid ${border}`, borderRadius: 9, padding: '11px 16px', color, fontSize: 13, cursor: quizAns !== null ? 'default' : 'pointer', textAlign: 'left', transition: 'all 0.2s' }}>
-                                <span style={{ fontWeight: 700, marginRight: 8 }}>{'ABCD'[oi]})</span>{opt}
-                              </button>
+                              <div key={i} style={{ background: T.s3, border: `1px solid ${c}25`, borderRadius: 10, padding: '14px', position: 'relative', overflow: 'hidden' }}>
+                                <div style={{ position: 'absolute', top: -10, right: -10, width: 50, height: 50, borderRadius: '50%', background: `${c}08` }} />
+                                <div style={{ fontSize: 20, marginBottom: 6 }}>{icons[i % icons.length]}</div>
+                                <div style={{ color: T.text, fontSize: 13, lineHeight: 1.5, fontWeight: 500 }}>{pt}</div>
+                                <div style={{ position: 'absolute', bottom: 0, left: 0, height: 2, width: '100%', background: `linear-gradient(90deg,${c},transparent)` }} />
+                              </div>
                             );
                           })}
                         </div>
-                        {quizAns !== null && (
-                          <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ fontSize: 13, color: quizAns === q.correct ? T.green : T.red, fontWeight: 600 }}>
-                              {quizAns === q.correct ? '✓ Correct!' : `✗ Incorrect — correct answer: ${'ABCD'[q.correct]}`}
-                            </span>
-                            {quizIdx < result.quizQuestions.length - 1 && (
-                              <button onClick={() => { setQuizIdx(i => i + 1); setQuizAns(null); }}
-                                style={{ background: T.accent, color: '#fff', border: 'none', padding: '7px 16px', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
-                                Next <ChevronRight size={13} />
-                              </button>
-                            )}
-                            {quizIdx === result.quizQuestions.length - 1 && (
-                              <span style={{ fontSize: 12, color: T.muted }}>Quiz complete! 🎉</span>
-                            )}
-                          </div>
-                        )}
                       </div>
-                    ) : null;
-                  })() : (
-                    <div style={{ color: T.muted, fontSize: 13, textAlign: 'center', padding: '32px 0' }}>
-                      No quiz questions were generated. Try regenerating with Medium or Deep depth.
-                    </div>
-                  )}
-                </div>
-              )}
+                    )}
 
-              {/* ── Flashcards tab ── */}
-              {tab === 'flashcards' && (
-                <div>
-                  {result.flashcards?.length > 0 ? (
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                        <div style={{ fontSize: 13, color: T.muted }}>Card {fcIdx + 1} of {result.flashcards.length}</div>
-                        <button onClick={() => { setFcIdx(0); setFcFlipped(false); }}
-                          style={{ background: 'none', border: `1px solid ${T.border}`, color: T.muted, borderRadius: 7, padding: '4px 10px', fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
-                          <RotateCcw size={11} />Reset
-                        </button>
-                      </div>
-                      <div onClick={() => setFcFlipped(!fcFlipped)} style={{ cursor: 'pointer' }}>
-                        <div style={{
-                          background: fcFlipped ? `${T.purple}15` : T.s3,
-                          border: `1px solid ${fcFlipped ? T.purple + '40' : T.border}`,
-                          borderRadius: 14, padding: '36px 28px', minHeight: 140,
-                          display: 'flex', flexDirection: 'column', alignItems: 'center',
-                          justifyContent: 'center', textAlign: 'center', transition: 'all 0.3s'
-                        }}>
-                          <div style={{ fontSize: 11, color: T.muted, letterSpacing: '0.08em', marginBottom: 12, textTransform: 'uppercase' }}>
-                            {fcFlipped ? 'Answer' : 'Question — click to reveal'}
+                    {msg.features?.simpler?.text && (
+                      <div style={{ marginTop: 12, background: `${T.green}10`, border: `1px solid ${T.green}30`, borderRadius: 10, padding: '14px 18px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <span style={{ fontSize: 11, color: T.green, fontWeight: 700, letterSpacing: '0.05em' }}>SIMPLIFIED</span>
+                          <button onClick={() => handleGenerateFeature(mi, 'simpler')}
+                            style={{ background: 'none', border: `1px solid ${T.green}40`, color: T.green, borderRadius: 6, padding: '2px 10px', fontSize: 11, cursor: 'pointer' }}>
+                            Regenerate
+                          </button>
+                        </div>
+                        <div style={{ color: T.text, fontSize: 14, lineHeight: 1.7 }}>
+                          <div className="md-content">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.features.simpler.text}</ReactMarkdown>
                           </div>
-                          <div style={{ fontSize: 16, color: T.text, fontWeight: fcFlipped ? 400 : 600, lineHeight: 1.6 }}>
-                            {fcFlipped ? result.flashcards[fcIdx]?.back : result.flashcards[fcIdx]?.front}
-                          </div>
-                          {!fcFlipped && <div style={{ marginTop: 14, fontSize: 11, color: T.dim }}>tap to flip</div>}
                         </div>
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 14 }}>
-                        <button onClick={() => { setFcIdx(i => (i - 1 + result.flashcards.length) % result.flashcards.length); setFcFlipped(false); }}
-                          style={{ background: T.s3, border: `1px solid ${T.border}`, color: T.muted, borderRadius: 8, padding: '8px 18px', cursor: 'pointer', fontSize: 13 }}>
-                          ← Prev
-                        </button>
-                        <button onClick={() => { setFcIdx(i => (i + 1) % result.flashcards.length); setFcFlipped(false); }}
-                          style={{ background: T.s3, border: `1px solid ${T.border}`, color: T.muted, borderRadius: 8, padding: '8px 18px', cursor: 'pointer', fontSize: 13 }}>
-                          Next →
-                        </button>
+                    )}
+
+                    {msg.features?.examples?.text && (
+                      <div style={{ marginTop: 12, background: `${T.accent}10`, border: `1px solid ${T.accent}30`, borderRadius: 10, padding: '14px 18px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <span style={{ fontSize: 11, color: T.accent, fontWeight: 700, letterSpacing: '0.05em' }}>EXAMPLES</span>
+                          <button onClick={() => handleGenerateFeature(mi, 'examples')}
+                            style={{ background: 'none', border: `1px solid ${T.accent}40`, color: T.accent, borderRadius: 6, padding: '2px 10px', fontSize: 11, cursor: 'pointer' }}>
+                            Regenerate
+                          </button>
+                        </div>
+                        <div style={{ color: T.text, fontSize: 14, lineHeight: 1.7 }}>
+                          <div className="md-content">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.features.examples.text}</ReactMarkdown>
+                          </div>
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 10 }}>
-                        {result.flashcards.map((_, i) => (
-                          <div key={i} onClick={() => { setFcIdx(i); setFcFlipped(false); }}
-                            style={{ width: 7, height: 7, borderRadius: '50%', background: fcIdx === i ? T.purple : T.dim, cursor: 'pointer', transition: 'all 0.2s' }} />
-                        ))}
+                    )}
+
+                    {/* ── Suggestion chips ── */}
+                    {!msg.local && (
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+                        {SUGGESTIONS.filter(s => !featureExists(msg, s.id)).map(s => {
+                          const loading = isGeneratingFeature(mi, s.id);
+                          return (
+                            <button key={s.id} onClick={() => handleGenerateFeature(mi, s.id)} disabled={loading}
+                              style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 16, background: `${s.color}12`, border: `1px solid ${s.color}40`, color: s.color, fontSize: 11, fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer', transition: 'all 0.15s' }}>
+                              {loading ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <s.Icon size={12} />}
+                              {loading ? 'Generating...' : s.label}
+                            </button>
+                          );
+                        })}
                       </div>
-                    </div>
-                  ) : (
-                    <div style={{ color: T.muted, fontSize: 13, textAlign: 'center', padding: '32px 0' }}>
-                      No flashcards were generated. Try regenerating.
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               )}
             </div>
-          </div>
-        )}
+          ))}
 
-        {/* ── Follow-up: What would you like to generate? ── */}
-        {result && (
-          <div style={{ display: 'flex', gap: 12, marginTop: 20, marginBottom: 8, maxWidth: 720 }}>
-            <div style={{
-              width: 36, height: 36, borderRadius: '50%',
-              background: `${T.purple}25`, border: `1px solid ${T.purple}40`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
-            }}>
-              <Brain size={16} color={T.purple} />
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: T.purple, fontWeight: 700, letterSpacing: '0.05em', marginBottom: 6 }}>LMS AI TUTOR</div>
-              <div style={{ color: T.text, fontSize: 14, lineHeight: 1.7, marginBottom: 12 }}>
-                Great! I've prepared your learning content above. Would you like to dive deeper? Pick an option below to generate more:
+          {/* ── STREAMING ── */}
+          {streamingText && (
+            <div style={{ display: 'flex', gap: rGap, marginBottom: 20, maxWidth: msgMaxW }}>
+              <div style={{ width: isMobile ? 30 : 36, height: isMobile ? 30 : 36, borderRadius: '50%', background: `${T.purple}25`, border: `1px solid ${T.purple}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Brain size={isMobile ? 14 : 16} color={T.purple} />
               </div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {[
-                  { label: 'Explanation',  Icon: AlignLeft,      color: T.accent },
-                  { label: 'Infographic',  Icon: Image,          color: T.green  },
-                  { label: 'Quiz',         Icon: HelpCircle,     color: T.amber  },
-                  { label: 'Flashcards',   Icon: FlipHorizontal, color: T.purple },
-                ].map(({ label, Icon, color }) => (
-                  <button key={label}
-                    onClick={() => setTab(label.toLowerCase())}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 7,
-                      padding: '8px 16px', borderRadius: 20,
-                      background: `${color}12`, border: `1px solid ${color}40`,
-                      color: color, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                      transition: 'all 0.15s'
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.background = `${color}25`; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = `${color}12`; }}
-                  >
-                    <Icon size={14} />{label}
-                  </button>
-                ))}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11, color: T.purple, fontWeight: 700, letterSpacing: '0.05em', marginBottom: 4 }}>LMS AI TUTOR</div>
+                <div ref={streamElRef} style={{ color: T.text, fontSize: 14, lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }} />
+                <Loader2 size={12} color={T.accent} style={{ animation: 'spin 1s linear infinite', marginTop: 6 }} />
               </div>
             </div>
-          </div>
-        )}
-      </div>
+          )}
 
-      {/* ── BOTTOM: Dropdowns + Input ── */}
-      <div style={{ flexShrink: 0, borderTop: `1px solid ${T.border}`, background: T.s1, padding: '14px 28px 18px' }}>
-        {/* ── Dropdown controls row (above input) ── */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 12, flexWrap: 'wrap' }}>
-          {/* Learning Mode dropdown */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: '0.06em' }}>LEARNING MODE</label>
-            <div style={{ position: 'relative' }}>
-              <select
-                value={mode}
-                onChange={e => setMode(e.target.value)}
-                style={{
-                  appearance: 'none',
-                  background: T.s2,
-                  border: `1px solid ${modeColors[mode] + '50' || T.border}`,
-                  borderRadius: 8,
-                  padding: '7px 34px 7px 12px',
-                  color: modeColors[mode] || T.text,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  outline: 'none',
-                  minWidth: 130,
-                  fontFamily: 'inherit',
-                  transition: 'border-color 0.15s'
-                }}
-              >
-                {MODES.map(m => <option key={m} value={m} style={{ background: T.s1, color: T.text }}>{m}</option>)}
-              </select>
-              <ChevronRight
-                size={13}
-                color={modeColors[mode] || T.muted}
-                style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%) rotate(90deg)', pointerEvents: 'none' }}
-              />
+          {/* ── LOADING ── */}
+          {loading && !streamingText && (
+            <div style={{ display: 'flex', gap: rGap, marginBottom: 20, maxWidth: msgMaxW }}>
+              <div style={{ width: isMobile ? 30 : 36, height: isMobile ? 30 : 36, borderRadius: '50%', background: `${T.purple}25`, border: `1px solid ${T.purple}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Brain size={isMobile ? 14 : 16} color={T.purple} />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Loader2 size={16} color={T.accent} style={{ animation: 'spin 1s linear infinite' }} />
+                <span style={{ fontSize: 13, color: T.muted }}>Generating...</span>
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Response Depth dropdown */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: '0.06em' }}>RESPONSE DEPTH</label>
-            <div style={{ position: 'relative' }}>
-              <select
-                value={length}
-                onChange={e => setLength(e.target.value)}
-                style={{
-                  appearance: 'none',
-                  background: T.s2,
-                  border: `1px solid ${length === 'Short' ? T.amber + '50' : length === 'Medium' ? T.accent + '50' : T.purple + '50'}`,
-                  borderRadius: 8,
-                  padding: '7px 34px 7px 12px',
-                  color: length === 'Short' ? T.amber : length === 'Medium' ? T.accent : T.purple,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  outline: 'none',
-                  minWidth: 130,
-                  fontFamily: 'inherit',
-                  transition: 'border-color 0.15s'
-                }}
-              >
-                {LENGTHS.map(l => <option key={l} value={l} style={{ background: T.s1, color: T.text }}>{l}</option>)}
-              </select>
-              <ChevronRight
-                size={13}
-                color={length === 'Short' ? T.amber : length === 'Medium' ? T.accent : T.purple}
-                style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%) rotate(90deg)', pointerEvents: 'none' }}
-              />
+          {/* ── ERROR ── */}
+          {err && (
+            <div style={{ maxWidth: 720, marginBottom: 16, color: T.red, fontSize: 12, background: `${T.red}12`, padding: '10px 14px', borderRadius: 8, border: `1px solid ${T.red}30` }}>
+              {err}
             </div>
-          </div>
-
-          {/* Active settings badge */}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto',
-            padding: '6px 14px', background: T.s2, border: `1px solid ${T.border}`, borderRadius: 20
-          }}>
-            <div style={{ width: 6, height: 6, borderRadius: '50%', background: T.green, flexShrink: 0 }} />
-            <span style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: '0.04em' }}>
-              {mode.toUpperCase()} · {length.toUpperCase()}
-            </span>
-          </div>
+          )}
         </div>
 
-        {/* Input row */}
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10 }}>
-          <div style={{
-            flex: 1, display: 'flex', alignItems: 'flex-end', gap: 8,
-            background: T.s2, border: `1px solid ${T.border}`, borderRadius: 12, padding: '10px 14px'
-          }}>
-            <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.muted, padding: '2px', display: 'flex', alignItems: 'center' }}>
-              <Paperclip size={16} />
-            </button>
-            <button onClick={() => setShowVoiceAgent(true)}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.muted, padding: '2px', display: 'flex', alignItems: 'center' }}
-              title="Open Voice Tutor"
-            >
-              <Mic size={16} />
-            </button>
-            <textarea
-              ref={inputRef}
-              value={topic}
-              onChange={e => setTopic(e.target.value)}
-              placeholder="Type your message to the AI Tutor…"
-              rows={1}
-              onKeyDown={e => { if (e.ctrlKey && e.key === 'Enter') handleGenerate(); }}
-              style={{
-                flex: 1, background: 'transparent', border: 'none', outline: 'none',
-                color: T.text, fontSize: 14, lineHeight: 1.6, resize: 'none',
-                fontFamily: 'inherit', padding: 0, minHeight: 22, maxHeight: 120
-              }}
-            />
+        {/* ── BOTTOM: Mode/Depth selects + Input ── */}
+        <div style={{ flexShrink: 0, borderTop: `1px solid ${T.border}`, background: T.s1, padding: isMobile ? '10px 14px 14px' : '14px 28px 18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 14, marginBottom: 10, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: '0.06em' }}>LEARNING MODE</label>
+              <div style={{ position: 'relative' }}>
+                <select value={mode} onChange={e => setMode(e.target.value)}
+                  style={{ appearance: 'none', background: T.s2, border: `1px solid ${modeColors[mode] + '50' || T.border}`, borderRadius: 8, padding: '7px 34px 7px 12px', color: modeColors[mode] || T.text, fontSize: 12, fontWeight: 600, cursor: 'pointer', outline: 'none', minWidth: 130, fontFamily: 'inherit' }}>
+                  {MODES.map(m => <option key={m} value={m} style={{ background: T.s1, color: T.text }}>{m}</option>)}
+                </select>
+                <ChevronRight size={13} color={modeColors[mode] || T.muted} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%) rotate(90deg)', pointerEvents: 'none' }} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: '0.06em' }}>RESPONSE DEPTH</label>
+              <div style={{ position: 'relative' }}>
+                <select value={length} onChange={e => setLength(e.target.value)}
+                  style={{ appearance: 'none', background: T.s2, border: `1px solid ${length === 'Short' ? T.amber + '50' : length === 'Medium' ? T.accent + '50' : T.purple + '50'}`, borderRadius: 8, padding: '7px 34px 7px 12px', color: length === 'Short' ? T.amber : length === 'Medium' ? T.accent : T.purple, fontSize: 12, fontWeight: 600, cursor: 'pointer', outline: 'none', minWidth: 130, fontFamily: 'inherit' }}>
+                  {LENGTHS.map(l => <option key={l} value={l} style={{ background: T.s1, color: T.text }}>{l}</option>)}
+                </select>
+                <ChevronRight size={13} color={length === 'Short' ? T.amber : length === 'Medium' ? T.accent : T.purple} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%) rotate(90deg)', pointerEvents: 'none' }} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 4 : 6, marginLeft: isMobile ? 0 : 'auto', padding: '6px 14px', background: T.s2, border: `1px solid ${T.border}`, borderRadius: 20 }}>
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: T.green, flexShrink: 0 }} />
+              <span style={{ fontSize: isMobile ? 10 : 11, color: T.muted, fontWeight: 600 }}>{mode.toUpperCase()} &middot; {length.toUpperCase()}</span>
+            </div>
           </div>
-          <button
-            onClick={handleGenerate}
-            disabled={loading}
-            style={{
-              width: 44, height: 44, borderRadius: 10,
-              background: loading ? T.dim : T.purple, border: 'none', cursor: loading ? 'not-allowed' : 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'all 0.2s', flexShrink: 0
-            }}>
-            {loading
-              ? <Loader2 size={18} color="#fff" style={{ animation: 'spin 1s linear infinite' }} />
-              : <Send size={18} color="#fff" />}
-          </button>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10 }}>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end', gap: 8, background: T.s2, border: `1px solid ${T.border}`, borderRadius: 12, padding: '10px 14px' }}>
+              <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.muted, padding: '2px', display: 'flex', alignItems: 'center' }}>
+                <Paperclip size={16} />
+              </button>
+              <button onClick={() => setShowVoiceAgent(true)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.muted, padding: '2px', display: 'flex', alignItems: 'center' }} title="Open Voice Tutor">
+                <Mic size={16} />
+              </button>
+              <textarea ref={inputRef} value={topic} onChange={e => setTopic(e.target.value)}
+                placeholder="Type your message to the AI Tutor\u2026" rows={1}
+                onKeyDown={handleKeyDown}
+                style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: T.text, fontSize: 14, lineHeight: 1.6, resize: 'none', fontFamily: 'inherit', padding: 0, minHeight: 22, maxHeight: 120 }} />
+            </div>
+            <button onClick={handleSend} disabled={loading}
+              style={{ width: 44, height: 44, borderRadius: 10, background: loading ? T.dim : T.purple, border: 'none', cursor: loading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              {loading ? <Loader2 size={18} color="#fff" style={{ animation: 'spin 1s linear infinite' }} /> : <Send size={18} color="#fff" />}
+            </button>
+          </div>
         </div>
       </div>
-      </div>
+
       {/* Voice Agent Overlay */}
       {showVoiceAgent && (
         <VoiceAgentView
@@ -660,6 +799,24 @@ export default function GeneralTutor() {
           initialSession={voiceSessionToRestore}
         />
       )}
+
+      <style>{`
+        .md-content p { margin: 0 0 0.6em 0; }
+        .md-content p:last-child { margin: 0; }
+        .md-content ul, .md-content ol { margin: 0.4em 0; padding-left: 1.5em; }
+        .md-content li { margin: 0.2em 0; }
+        .md-content strong { color: #DDE3F2; font-weight: 700; }
+        .md-content em { color: #9B6EF8; font-style: italic; }
+        .md-content code { background: #182033; padding: 1px 5px; border-radius: 4px; font-size: 13px; color: #F5A95B; }
+        .md-content pre { background: #0C0F1C; padding: 12px; border-radius: 8px; overflow-x: auto; margin: 0.6em 0; border: 1px solid rgba(255,255,255,0.07); }
+        .md-content pre code { background: none; padding: 0; color: #DDE3F2; }
+        .md-content table { border-collapse: collapse; margin: 0.6em 0; }
+        .md-content th, .md-content td { border: 1px solid rgba(255,255,255,0.12); padding: 6px 10px; text-align: left; font-size: 13px; }
+        .md-content th { background: #111827; color: #9B6EF8; font-weight: 600; }
+        .md-content a { color: #5B8CF8; text-decoration: underline; }
+        .md-content blockquote { border-left: 3px solid #5B8CF8; margin: 0.6em 0; padding: 4px 12px; color: #647298; background: rgba(91,140,248,0.06); border-radius: 0 8px 8px 0; }
+      `}</style>
     </div>
+  </>
   );
 }

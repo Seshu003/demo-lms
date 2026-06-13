@@ -2,10 +2,12 @@
 
 import { Code2 } from 'lucide-react';
 import { T } from '@/lib/lms-data';
+import { useMediaQuery, isMobileMQ } from '@/lib/useMediaQuery';
 
 export default function CodingTutor() {
+  const isMobile = useMediaQuery(isMobileMQ);
   return (
-    <div style={{ padding: '32px 36px', maxWidth: 700 }}>
+    <div style={{ padding: isMobile ? '20px 16px' : '32px 36px', maxWidth: 700 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
         <div style={{
           width: 32, height: 32, borderRadius: 9,

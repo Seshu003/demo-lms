@@ -4,11 +4,17 @@ import {
   BookOpen, Brain, CheckCircle, ChevronRight
 } from 'lucide-react';
 import { T, ALL_LESSONS } from '@/lib/lms-data';
+import { useMediaQuery, isMobileMQ, isTabletMQ } from '@/lib/useMediaQuery';
 
 export default function Dashboard({ completed = {} }) {
   const total = ALL_LESSONS.length;
   const done  = Object.values(completed).filter(Boolean).length;
   const pct   = Math.round((done / total) * 100);
+  const isMobile = useMediaQuery(isMobileMQ);
+  const isTablet = useMediaQuery(isTabletMQ);
+  const rPad = isMobile ? 16 : 36;
+  const statCols = isMobile ? '1fr' : isTablet ? 'repeat(2,1fr)' : 'repeat(3,1fr)';
+  const bottomCols = isMobile ? '1fr' : '1fr 1fr';
 
   const stats = [
     { label: 'Lessons Completed', val: `${done}/${total}`, sub: `${pct}% done`,          color: T.accent, Icon: CheckCircle },
@@ -17,19 +23,23 @@ export default function Dashboard({ completed = {} }) {
   ];
 
   return (
-    <div style={{ padding: '32px 36px', maxWidth: 900 }}>
+    <div style={{ padding: `32px ${rPad}px`, maxWidth: 900 }}>
       {/* Hero */}
-      <div style={{ marginBottom: 32 }}>
-        <h1 style={{ color: T.text, fontSize: 28, fontWeight: 700, margin: 0, letterSpacing: '-0.04em' }}>
-          Build understanding,<br /><span style={{ color: T.accent }}>not just notes.</span>
+      <div style={{ marginBottom: isMobile ? 20 : 32 }}>
+        <h1 style={{ color: T.text, fontSize: isMobile ? 22 : 28, fontWeight: 700, margin: 0, letterSpacing: '-0.04em' }}>
+          {isMobile ? (
+            <>Build understanding,<br />not just notes.</>
+          ) : (
+            <>Build understanding,<br /><span style={{ color: T.accent }}>not just notes.</span></>
+          )}
         </h1>
-        <p style={{ color: T.muted, marginTop: 8, fontSize: 15 }}>
+        <p style={{ color: T.muted, marginTop: 8, fontSize: isMobile ? 14 : 15 }}>
           Your AI-powered learning workspace is ready.
         </p>
       </div>
 
       {/* Stat cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, marginBottom: 28 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: statCols, gap: 14, marginBottom: 28 }}>
         {stats.map(({ label, val, sub, color, Icon }) => (
           <div key={label} style={{ background: T.s2, border: `1px solid ${T.border}`, borderRadius: 12, padding: '18px 20px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
@@ -45,7 +55,7 @@ export default function Dashboard({ completed = {} }) {
       </div>
 
       {/* Bottom cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: bottomCols, gap: 14 }}>
         {/* Course card */}
         <div style={{ background: T.s2, border: `1px solid ${T.border}`, borderRadius: 12, padding: '20px' }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 4 }}>Python Fundamentals</div>

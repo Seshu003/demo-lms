@@ -1,10 +1,13 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Home, BookOpen, Brain, Code2, BarChart3, Zap } from 'lucide-react';
 import { T } from '@/lib/lms-data';
 import UnifiedSidebar from './UnifiedSidebar';
 import VoiceChatMessages from './VoiceChatMessages';
 import VoiceRobotVisualizer from './VoiceRobotVisualizer';
+import MobileNav from '@/components/MobileNav';
+import { useMediaQuery, isMobileMQ } from '@/lib/useMediaQuery';
 
 const SESSIONS_KEY = 'voice-tutor-sessions';
 
@@ -288,38 +291,154 @@ export default function VoiceAgentView({ onClose, initialSession }) {
   ];
 
   const isActive = connectionStatus !== 'disconnected' && connectionStatus !== 'error';
+  const isMobile = useMediaQuery(isMobileMQ);
+  const voiceZ = isMobile ? 1010 : 1000;
+
+  function getDateLabel(dateStr) {
+    if (!dateStr) return 'Older';
+    const date = new Date(dateStr);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const weekStart = new Date(today);
+    weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+    if (date >= today) return 'Today';
+    if (date >= yesterday) return 'Yesterday';
+    if (date >= weekStart) return 'This Week';
+    return 'Older';
+  }
+
+  const voiceNavItems = [
+    { href: '/',              Icon: Home,      label: 'Dashboard'     },
+    { href: '/courses',       Icon: BookOpen,  label: 'Courses'       },
+    { href: '/general-tutor', Icon: Brain,     label: 'General Tutor' },
+    { href: '/coding-tutor',  Icon: Code2,     label: 'Coding Tutor'  },
+    { href: '/progress',      Icon: BarChart3, label: 'Progress'      },
+  ];
+
+  const voiceExtras = (close) => {
+    const items = [];
+
+    // Language selector
+    items.push(
+      <div key="lang-select">
+        <label style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>LANGUAGE</label>
+        <select value={selectedLanguage} onChange={(e) => setSelectedLanguage(e.target.value)} disabled={isActive}
+          style={{ width: '100%', appearance: 'none', background: T.s2, border: `1px solid ${T.border}`, borderRadius: 8, padding: '8px 12px', color: T.text, fontSize: 13, fontWeight: 600, cursor: isActive ? 'not-allowed' : 'pointer', outline: 'none', fontFamily: 'inherit', opacity: isActive ? 0.5 : 1 }}>
+          {LANGUAGES.map((lang) => (
+            <option key={lang.id} value={lang.id} style={{ background: T.s1, color: T.text }}>{lang.flag} {lang.name}</option>
+          ))}
+        </select>
+      </div>
+    );
+
+    // Subject selector
+    items.push(
+      <div key="subj-select">
+        <label style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>SUBJECT</label>
+        <select value={selectedSubject} onChange={(e) => setSelectedSubject(e.target.value)} disabled={isActive}
+          style={{ width: '100%', appearance: 'none', background: T.s2, border: `1px solid ${T.border}`, borderRadius: 8, padding: '8px 12px', color: T.text, fontSize: 13, fontWeight: 600, cursor: isActive ? 'not-allowed' : 'pointer', outline: 'none', fontFamily: 'inherit', opacity: isActive ? 0.5 : 1 }}>
+          {SUBJECTS.map((sub) => (
+            <option key={sub.id} value={sub.id} style={{ background: T.s1, color: T.text }}>{sub.name}</option>
+          ))}
+        </select>
+      </div>
+    );
+
+    // Session history (mobile only)
+    if (isMobile && mergedSessions?.length > 0) {
+      const groups = {};
+      const ordered = ['Today', 'Yesterday', 'This Week', 'Older'];
+      for (const s of mergedSessions) {
+        const label = getDateLabel(s.timestamp || s.startedAt);
+        if (!groups[label]) groups[label] = [];
+        groups[label].push(s);
+      }
+      for (const key of Object.keys(groups)) {
+        groups[key].sort((a, b) => {
+          return new Date(b.timestamp || b.startedAt).getTime() - new Date(a.timestamp || a.startedAt).getTime();
+        });
+      }
+
+      items.push(
+        <div key="sessions">
+          <div style={{ fontSize: 11, color: T.muted, fontWeight: 600, letterSpacing: '0.06em', marginBottom: 8 }}>SESSION HISTORY</div>
+          {ordered.map(group => {
+            const sList = groups[group];
+            if (!sList) return null;
+            return (
+              <div key={group} style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 10, color: T.dim, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '0 4px', marginBottom: 4 }}>{group}</div>
+                {sList.map(session => {
+                  const isV = session.type === 'voice';
+                  return (
+                    <button key={session.type + '-' + session.id}
+                      onClick={() => {
+                        if (session.type === 'voice') {
+                          handleSelectSession(session);
+                        } else {
+                          onClose();
+                        }
+                        if (close) close();
+                      }}
+                      style={{
+                        width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 8, border: 'none',
+                        background: 'transparent', color: T.muted, cursor: 'pointer', fontSize: 12,
+                        display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'inherit',
+                      }}>
+                      <span style={{ width: 20, height: 20, borderRadius: 6, background: isV ? `${T.accent}20` : `${T.purple}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        {isV ? <Zap size={11} color={T.accent} /> : <Brain size={11} color={T.purple} />}
+                      </span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{session.label || 'Untitled'}</span>
+                      <span style={{ fontSize: 9, color: T.dim, flexShrink: 0 }}>{isV ? 'Voice' : 'Text'}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    return items;
+  };
 
   return (
     <div style={{
-      position: 'fixed', inset: 0, zIndex: 1000,
+      position: 'fixed', inset: 0, zIndex: voiceZ,
       display: 'flex', background: T.bg, color: T.text,
       fontFamily: 'var(--font-outfit), "Segoe UI", sans-serif'
     }}>
-      {/* History Sidebar */}
-      <UnifiedSidebar
-        sessions={mergedSessions}
-        currentSessionId={null}
-        onSelectSession={(session) => {
-          if (session.type === 'voice') {
-            handleSelectSession(session);
-          } else {
-            // Text session clicked — close overlay, parent will restore it
-            onClose();
-          }
-        }}
-        onBack={onClose}
-      />
+      {/* History Sidebar — desktop only; mobile uses MobileNav menu */}
+      {!isMobile && (
+        <UnifiedSidebar
+          sessions={mergedSessions}
+          currentSessionId={null}
+          onSelectSession={(session) => {
+            if (session.type === 'voice') {
+              handleSelectSession(session);
+            } else {
+              // Text session clicked — close overlay, parent will restore it
+              onClose();
+            }
+          }}
+          onBack={onClose}
+        />
+      )}
+      <MobileNav title="Voice Tutor" accent={T.accent} items={voiceNavItems} extras={voiceExtras} zBase={isMobile ? 10 : 0} />
 
       {/* Main Area */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, position: 'relative' }}>
         {/* Header */}
         <header style={{
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          padding: '0 24px', height: 56,
+          padding: isMobile ? '0 12px' : '0 24px', height: isMobile ? 48 : 56,
           background: T.s1, borderBottom: `1px solid ${T.border}`, flexShrink: 0
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <h2 style={{ fontSize: 16, fontWeight: 700, color: T.text, margin: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 12 }}>
+            <h2 style={{ fontSize: isMobile ? 14 : 16, fontWeight: 700, color: T.text, margin: 0 }}>
               {SUBJECTS.find((s) => s.id === selectedSubject)?.name || 'General Tutor'}
             </h2>
             <div style={{ width: 1, height: 16, background: T.dim }} />
@@ -342,51 +461,53 @@ export default function VoiceAgentView({ onClose, initialSession }) {
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {/* Language Selector */}
-            <select value={selectedLanguage} onChange={(e) => setSelectedLanguage(e.target.value)}
-              disabled={isActive}
-              style={{
-                background: T.s2, color: T.muted, fontSize: 11, fontWeight: 600,
-                border: `1px solid ${T.border}`, borderRadius: 8, padding: '6px 10px',
-                cursor: isActive ? 'not-allowed' : 'pointer', outline: 'none',
-                fontFamily: 'inherit', opacity: isActive ? 0.5 : 1
-              }}
-            >
-              {LANGUAGES.map((lang) => (
-                <option key={lang.id} value={lang.id} style={{ background: T.s1, color: T.text }}>
-                  {lang.flag} {lang.name}
-                </option>
-              ))}
-            </select>
+          <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 4 : 8 }}>
+            {!isMobile && (<React.Fragment>
+              <select value={selectedLanguage} onChange={(e) => setSelectedLanguage(e.target.value)}
+                disabled={isActive}
+                style={{
+                  background: T.s2, color: T.muted, fontSize: 11, fontWeight: 600,
+                  border: `1px solid ${T.border}`, borderRadius: 8, padding: '6px 10px',
+                  cursor: isActive ? 'not-allowed' : 'pointer', outline: 'none',
+                  fontFamily: 'inherit', opacity: isActive ? 0.5 : 1
+                }}
+              >
+                {LANGUAGES.map((lang) => (
+                  <option key={lang.id} value={lang.id} style={{ background: T.s1, color: T.text }}>
+                    {lang.flag} {lang.name}
+                  </option>
+                ))}
+              </select>
 
-            {/* Subject Selector */}
-            <select value={selectedSubject} onChange={(e) => setSelectedSubject(e.target.value)}
-              disabled={isActive}
-              style={{
-                background: T.s2, color: T.muted, fontSize: 11, fontWeight: 600,
-                border: `1px solid ${T.border}`, borderRadius: 8, padding: '6px 10px',
-                cursor: isActive ? 'not-allowed' : 'pointer', outline: 'none',
-                fontFamily: 'inherit', opacity: isActive ? 0.5 : 1
-              }}
-            >
-              {SUBJECTS.map((sub) => (
-                <option key={sub.id} value={sub.id} style={{ background: T.s1, color: T.text }}>
-                  {sub.name}
-                </option>
-              ))}
-            </select>
+              <select value={selectedSubject} onChange={(e) => setSelectedSubject(e.target.value)}
+                disabled={isActive}
+                style={{
+                  background: T.s2, color: T.muted, fontSize: 11, fontWeight: 600,
+                  border: `1px solid ${T.border}`, borderRadius: 8, padding: '6px 10px',
+                  cursor: isActive ? 'not-allowed' : 'pointer', outline: 'none',
+                  fontFamily: 'inherit', opacity: isActive ? 0.5 : 1
+                }}
+              >
+                {SUBJECTS.map((sub) => (
+                  <option key={sub.id} value={sub.id} style={{ background: T.s1, color: T.text }}>
+                    {sub.name}
+                  </option>
+                ))}
+              </select>
+            </React.Fragment>)}
           </div>
         </header>
 
-        {/* Chat Messages */}
-        <VoiceChatMessages conversation={conversation} />
+        {/* Chat Messages — hidden when empty so voice interface can center */}
+        {conversation.length > 0 && <VoiceChatMessages conversation={conversation} />}
 
         {/* Voice Interface */}
         <div style={{
           display: 'flex', flexDirection: 'column', alignItems: 'center',
-          padding: '12px 24px 18px', flexShrink: 0,
-          borderTop: `1px solid ${T.border}`, background: T.s1
+          padding: isMobile ? '10px 12px 14px' : '12px 24px 18px',
+          flex: conversation.length === 0 ? 1 : undefined,
+          justifyContent: conversation.length === 0 ? 'center' : undefined,
+          borderTop: `1px solid ${T.border}`, background: T.s1,
         }}>
           {/* Status Message */}
           <p style={{ fontSize: 11, color: T.muted, textAlign: 'center', margin: '0 0 8px' }}>{statusMessage}</p>
@@ -405,7 +526,7 @@ export default function VoiceAgentView({ onClose, initialSession }) {
 
           {/* Robot Visualizer */}
           <div style={{
-            position: 'relative', width: 80, height: 80,
+            position: 'relative', width: isMobile ? 64 : 80, height: isMobile ? 64 : 80,
             display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8
           }}>
             <div style={{
@@ -491,12 +612,12 @@ export default function VoiceAgentView({ onClose, initialSession }) {
 
         {/* Background blurs */}
         <div style={{
-          position: 'fixed', top: 0, left: 260, width: 400, height: 400,
+          position: 'fixed', top: 0, left: isMobile ? 0 : 260, width: isMobile ? 200 : 400, height: isMobile ? 200 : 400,
           background: `${T.purple}08`, borderRadius: '50%', filter: 'blur(100px)',
           pointerEvents: 'none', transform: 'translate(-50%, -50%)', zIndex: -1
         }} />
         <div style={{
-          position: 'fixed', bottom: 0, right: 0, width: 300, height: 300,
+          position: 'fixed', bottom: 0, right: 0, width: isMobile ? 150 : 300, height: isMobile ? 150 : 300,
           background: `${T.green}05`, borderRadius: '50%', filter: 'blur(80px)',
           pointerEvents: 'none', transform: 'translate(30%, 30%)', zIndex: -1
         }} />
