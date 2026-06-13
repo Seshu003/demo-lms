@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  BookOpen, Brain, Code2, BarChart3, Home, Zap
+  BookOpen, Brain, Code2, BarChart3, Home, Zap, LogOut
 } from 'lucide-react';
 import { T } from '@/lib/lms-data';
 import { useMediaQuery, isMobileMQ } from '@/lib/useMediaQuery';
@@ -47,9 +47,19 @@ export default function Sidebar() {
       <MobileNav
         title="LMS AI"
         accent={T.accent}
-        items={NAV.map(({ id, Icon, label }) => ({
-          href: id, Icon, label,
-        }))}
+        items={[
+          ...NAV.map(({ id, Icon, label }) => ({
+            href: id, Icon, label,
+          })),
+          {
+            label: 'Log Out',
+            Icon: LogOut,
+            onClick: () => {
+              localStorage.removeItem('frappe_user');
+              window.location.href = '/login';
+            }
+          }
+        ]}
       />
     );
   }
@@ -90,13 +100,37 @@ export default function Sidebar() {
           );
         })}
       </div>
-      <div style={{ padding: '14px 18px', borderTop: `1px solid ${T.border}` }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          <div style={{ width: 30, height: 30, borderRadius: '50%', background: `${T.purple}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: T.purple, fontWeight: 700 }}>S</div>
-          <div>
-            <div style={{ color: T.text, fontSize: 13, fontWeight: 500 }}>Student</div>
-            <div style={{ color: T.muted, fontSize: 11 }}>Free Plan</div>
+      <div style={{ padding: '14px 18px', borderTop: `1px solid ${T.border}`, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <div style={{ width: 30, height: 30, borderRadius: '50%', background: `${T.purple}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: T.purple, fontWeight: 700 }}>S</div>
+            <div>
+              <div style={{ color: T.text, fontSize: 13, fontWeight: 500 }}>Student</div>
+              <div style={{ color: T.muted, fontSize: 11 }}>Free Plan</div>
+            </div>
           </div>
+          <button 
+            onClick={() => {
+              localStorage.removeItem('frappe_user');
+              window.location.href = '/login';
+            }}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: T.muted,
+              cursor: 'pointer',
+              padding: 4,
+              display: 'flex',
+              alignItems: 'center',
+              borderRadius: 4,
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = T.red; e.currentTarget.style.background = 'rgba(245, 91, 107, 0.08)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = T.muted; e.currentTarget.style.background = 'transparent'; }}
+            title="Log Out"
+          >
+            <LogOut size={15} />
+          </button>
         </div>
       </div>
     </div>

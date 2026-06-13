@@ -1,6 +1,6 @@
 import { Outfit } from 'next/font/google';
 import './globals.css';
-import Sidebar from '@/components/Sidebar';
+import LayoutWrapper from '@/components/LayoutWrapper';
 
 const outfit = Outfit({
   subsets: ['latin'],
@@ -17,12 +17,7 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en" className={outfit.variable}>
       <body style={{ margin: 0, padding: 0, backgroundColor: '#07080F' }}>
-        <div style={{ display: 'flex', minHeight: '100vh', background: '#07080F', color: '#DDE3F2' }}>
-          <Sidebar />
-          <div className="sidebar-content-area" style={{ flex: 1, overflowY: 'auto', maxHeight: '100vh' }}>
-            {children}
-          </div>
-        </div>
+        <LayoutWrapper>{children}</LayoutWrapper>
       </body>
     </html>
   );
